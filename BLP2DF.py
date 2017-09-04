@@ -120,7 +120,7 @@ def pd2DB (data,crsr):
                 query_insert="INSERT INTO "+str(key)+" VALUES (%s);" % var_string
                 crsr.execute(query_insert,row)
         else:  # write new data to database
-            query_last="select [Date] from "+str(key)+" order by [Date] desc"
+            query_last="select top 1 [Date] from "+str(key)+" order by [Date] desc"
             crsr.execute(query_last)    
             Last_Index = datetime.date(crsr.fetchone()[0])
             df=df.loc[Last_Index :]
@@ -149,8 +149,8 @@ if __name__ == "__main__":
        srcDB = 'C:\\Test.accdb'
        destDB = 'C:\\Test_backup.accdb'
        
-       testAccess.Repair_Compact_DB(srcDB, destDB) # repair and compact database
-       [crsr,cnxn]=testAccess.Build_Access_Connect(conn_str)
+       #testAccess.Repair_Compact_DB(srcDB, destDB) # uncomment to repair and compact database 
+       [crsr,cnxn]=testAccess.Build_Access_Connect(conn_str) 
       
        pd2DB (data,crsr)
        
