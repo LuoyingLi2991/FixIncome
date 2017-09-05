@@ -123,25 +123,69 @@ def pd2DB (data,crsr):
             query_last="select top 1 [Date] from "+str(key)+" order by [Date] desc"
             crsr.execute(query_last)    
             Last_Index = datetime.date(crsr.fetchone()[0])
-            df=df.loc[Last_Index :]
-            if len(df.index)>1:
-                count=0
-                for index, row in df.iterrows():
-                    if count==0:
-                        count=1
-                    else:
-                        row=list(row)
-                        row.insert(0,index)
-                        var_string = ', '.join('?' * len(row))
-                        query_insert="INSERT INTO "+str(key)+" VALUES (%s);" % var_string
-                        crsr.execute(query_insert,row)
+            df_first_index=df.index.tolist()[0]
+            if df_first_index <Last_Index:
+                df=df.loc[Last_Index :]
+                if len(df.index)>1:
+                    count=0
+                    for index, row in df.iterrows():
+                        if count==0:
+                            count=1
+                        else:
+                            row=list(row)
+                            row.insert(0,index)
+                            var_string = ', '.join('?' * len(row))
+                            query_insert="INSERT INTO "+str(key)+" VALUES (%s);" % var_string
+                            crsr.execute(query_insert,row)
+            else: print "Extract Dates Range is not enough!"
+   
+
+def DF_Merge(key,value,heads,flds,start,end):
+    #flds=["PX_LAST"]
+    #start="20070101"
+    #end="20170120"
+    data=bdh(value,flds,start,end,periodselection='WEEKLY')
+    count=0
+    headers=dict(zip(value,heads))
+    for key, each in data.items():
+        each.rename(columns={flds[0]:headers[key]},inplace=True)
+        #print each.head()
+        if count==0:
+            result=each
+            count=count+1
+        else:
+            result=pd.merge(result,each, left_index=True, right_index=True)
+    result=result[heads]
+    #print result.head()
+    return result
+
+
                         
                 
    
 if __name__ == "__main__":
     print "HistoryDataExtraction"
     try:
-       data=bdh(["IBM US Equity","MSFT US Equity","AAPL US Equity"], ["PX_LAST","OPEN","VWAP_VOLUME"], "20170101","20170120")
+       Keys=['Spot', 'Fwd3m']
+       Values=[['USSWC CMPN Curncy','USSWF CMPN Curncy','USSWAP1 CMPN Curncy',
+                'USSWAP2  CMPN Curncy','USSWAP3  CMPN Curncy',
+                'USSWAP5  CMPN Curncy','USSWAP10 CMPN Curncy'], 
+                ['USFS0CC  BLC Curncy','USFS0CF  BLC Curncy',
+                 'USFS0C1  BLC Curncy','USFS0C2  BLC Curncy',
+                 'USFS0C3  BLC Curncy','USFS0C5  BLC Curncy',
+                 'USFS0C10 BLC Curncy']]
+       flds=["PX_LAST"]
+       start="20070101"
+       end="20170120"
+                                
+       heads=['3m','6m','1y','2y', '3y','5y','10y']
+       
+       Inputs_dict=dict(zip(Keys,Values))
+       df_dict={}
+       for key,value in Inputs_dict.items():
+           df_dict[key]=DF_Merge(key,value,heads,flds,start,end)
+       #print df_dict
+       #data=bdh(["IBM US Equity","MSFT US Equity","AAPL US Equity"], ["PX_LAST","OPEN","VWAP_VOLUME"], "20170101","20170120")
        #print data
        conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; '
                    'DBQ=C:\\Test.accdb;')
@@ -152,11 +196,13 @@ if __name__ == "__main__":
        #testAccess.Repair_Compact_DB(srcDB, destDB) # uncomment to repair and compact database 
        [crsr,cnxn]=testAccess.Build_Access_Connect(conn_str) 
       
-       pd2DB (data,crsr)
+       pd2DB(df_dict, crsr)
        
        cnxn.commit()
        cnxn.close()
        
        
-    except KeyboardInterrupt:
+    except :
         print "Ctrl+C pressed. Stopping..."
+        cnxn.commit()
+        cnxn.close()
