@@ -74,7 +74,7 @@ def analyse(df_dict):
     df_roll_down = pd.DataFrame(roll_down_list, index=index,
                                 columns=header)  # create roll down dataframe with all rolldown
     cur_spot = df_dict['Spot'].iloc[-1].to_dict()  # current spot rates of all tenors
-    cur_fwd = df_dict['Forward'].iloc[-1].to_dict()  # current forward rates of all tenors
+    cur_fwd = df_dict['Fwd3m'].iloc[-1].to_dict()  # current forward rates of all tenors
     roll_down = list(df_roll_down.iloc[-1].values)
     spot_curve = SpotCurve(cur_spot, cur_fwd)
     tr = spot_curve.calc_total_return(header[1:],prd)  # calculate total return from current spot rates and current forward rates
@@ -103,22 +103,20 @@ def write2DB(roll_down, z_score_rd, carry, z_score, tr):
 
 
 if __name__ == "__main__":
-    conn_str = (r'DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; '
-                r''r'DBQ=C:\\Users\\luoying.li\\Documents\\DummySheet.accdb;')
+    conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; '
+                'DBQ=C:\\Test.accdb;')
 
-    srcDB = 'C:\\Users\\luoying.li\\Documents\\DummySheet.accdb'
-    destDB = 'C:\\Users\\luoying.li\\Documents\\DummySheet_backup.accdb'
+    #srcDB = 'C:\\Users\\luoying.li\\Documents\\DummySheet.accdb'
+    #destDB = 'C:\\Users\\luoying.li\\Documents\\DummySheet_backup.accdb'
 
-    Repair_Compact_DB(srcDB, destDB) # uncomment to Repair and Compact Database
+    #Repair_Compact_DB(srcDB, destDB) # uncomment to Repair and Compact Database
     [crsr,cnxn]=Build_Access_Connect(conn_str)
     df_dict=Tables2DF(crsr)
     [roll_down, z_score_rd, carry, z_score, tr,df]=analyse(df_dict)
     #write2DB(roll_down, z_score_rd, carry, z_score, tr) # uncomment to write results to DataBase
     
     print roll_down
-    
-    
-    #print crsr.fetchone()
+    print z_score
     
     cnxn.commit()
     cnxn.close()

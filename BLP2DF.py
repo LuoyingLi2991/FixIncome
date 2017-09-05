@@ -40,7 +40,7 @@ def bdh(ticker_list, fld_list, start_date, end_date=date.today().strftime('%Y%m%
             request.getElement("securities").appendValue(t)
         for f in fld_list:
             request.getElement("fields").appendValue(f)
-        request.set("periodicityAdjustment", "ACTUAL")
+        request.set("periodicityAdjustment", "CALENDAR")
         request.set("periodicitySelection", periodselection)
         request.set("startDate", start_date)
         request.set("endDate", end_date)
@@ -141,9 +141,17 @@ def pd2DB (data,crsr):
    
 
 def DF_Merge(key,value,heads,flds,start,end):
-    #flds=["PX_LAST"]
-    #start="20070101"
-    #end="20170120"
+    """Merge seperate DataFrames into one TimeSeries df dict
+    Argument
+    key -- dictionary key
+    value -- list of tickers
+    flds -- list of fields
+    start --start date e.g "20070101"
+    end --end date e.g "20070101"
+    heads -- desired col sequence in list format
+    Output
+    Dictionary of DataFrame
+    """    
     data=bdh(value,flds,start,end,periodselection='WEEKLY')
     count=0
     headers=dict(zip(value,heads))
@@ -160,9 +168,6 @@ def DF_Merge(key,value,heads,flds,start,end):
     return result
 
 
-                        
-                
-   
 if __name__ == "__main__":
     print "HistoryDataExtraction"
     try:
@@ -176,7 +181,7 @@ if __name__ == "__main__":
                  'USFS0C10 BLC Curncy']]
        flds=["PX_LAST"]
        start="20070101"
-       end="20170120"
+       end="20170823"
                                 
        heads=['3m','6m','1y','2y', '3y','5y','10y']
        
