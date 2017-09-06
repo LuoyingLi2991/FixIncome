@@ -4,6 +4,8 @@ from pandas import DataFrame
 from datetime import datetime, date
 import pandas as pd
 import testAccess
+import xlwings as xw
+import numpy as np
  
 
 
@@ -25,15 +27,16 @@ def bdh(ticker_list, fld_list, start_date, end_date=date.today().strftime('%Y%m%
             print("Failed to open //blp/refdata")
         
         refDataService = session.getService("//blp/refdata")
-        
         if isinstance(ticker_list,str):
             ticker_list = [ticker_list]
         if isinstance(fld_list,str):
             fld_list = [fld_list]
         if hasattr(start_date, 'strftime'):
             start_date = start_date.strftime('%Y%m%d')
+            print start_date
         if hasattr(end_date, 'strftime'):
             end_date = end_date.strftime('%Y%m%d')
+            print end_date
         #print ticker_list,fld_list,start_date, end_date
         request = refDataService.createRequest("HistoricalDataRequest")
         for t in ticker_list:
@@ -66,7 +69,6 @@ def bdh(ticker_list, fld_list, start_date, end_date=date.today().strftime('%Y%m%
             if ev.eventType() == blpapi.Event.RESPONSE:
                     # Response completly received, so we could exit
                 break
-        
         pd_dict=dict()
 
         if len(data) == 0:
@@ -152,6 +154,7 @@ def DF_Merge(key,value,heads,flds,start,end):
     Output
     Dictionary of DataFrame
     """    
+    #print key,value,heads,flds,start,end
     data=bdh(value,flds,start,end,periodselection='WEEKLY')
     count=0
     headers=dict(zip(value,heads))
@@ -167,6 +170,60 @@ def DF_Merge(key,value,heads,flds,start,end):
     #print result.head()
     return result
 
+
+def removeUni(l):
+    result=[]
+    for each in l:
+        each=each.replace(u'\xa0', ' ').encode('utf-8')
+        result.append(each)
+    return result
+
+
+@xw.func
+@xw.arg('spot', np.array, ndim=2)
+@xw.arg('fwd', np.array, ndim=2)
+@xw.arg('startD', np.array, ndim=2)
+@xw.arg('endD', np.array, ndim=2)
+@xw.arg('heads', np.array, ndim=2)
+#@xw.ret(expand='table')   
+def testBLP(heads, spot,fwd,startD,endD):
+    try:
+        heads=removeUni(heads[0])
+        #print heads
+        Keys=['Spot', 'Fwd3m']
+        flds=["PX_LAST"]
+        spot=removeUni(spot[0])
+        fwd=removeUni(fwd.tolist()[0])
+        Values=[spot,fwd]
+        start=str(startD.tolist()[0][0])
+        #print start
+        end=str(endD.tolist()[0][0])
+        #print end
+        Inputs_dict=dict(zip(Keys,Values))
+        #print Inputs_dict
+        df_dict={}
+        for key,value in Inputs_dict.items():
+            df_dict[key]=DF_Merge(key,value,heads,flds,start,end)
+        #print df_dict
+        conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; '
+                'DBQ=C:\\Test.accdb;')
+        [crsr,cnxn]=testAccess.Build_Access_Connect(conn_str)
+        pd2DB(df_dict, crsr)
+        cnxn.commit()
+        df_dict=testAccess.Tables2DF(crsr)
+        [roll_down, z_score_rd, carry, z_score, tr]=testAccess.analyse(df_dict)
+        cnxn.close()
+        #print roll_down, z_score, carry, z_score_rd, tr
+    
+        return roll_down, z_score, carry, z_score_rd, tr
+    except:
+        return "Error"
+        #cnxn.commit()
+        #cnxn.close()
+        
+    
+    
+'''
 
 if __name__ == "__main__":
     print "HistoryDataExtraction"
@@ -210,4 +267,4 @@ if __name__ == "__main__":
     except :
         print "Ctrl+C pressed. Stopping..."
         cnxn.commit()
-        cnxn.close()
+        cnxn.close()'''
