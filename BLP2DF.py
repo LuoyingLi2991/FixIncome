@@ -172,6 +172,7 @@ def DF_Merge(key,value,heads,flds,start,end):
 
 
 def removeUni(l):
+    """convert unicode to string"""
     result=[]
     for each in l:
         each=each.replace(u'\xa0', ' ').encode('utf-8')
@@ -213,8 +214,13 @@ def testBLP(heads, spot,fwd,startD,endD):
         df_dict=testAccess.Tables2DF(crsr)
         [roll_down, z_score_rd, carry, z_score, tr]=testAccess.analyse(df_dict)
         cnxn.close()
+        print roll_down, z_score, carry, z_score_rd, tr
+        roll_down.insert(0,"Roll down")
+        z_score_rd.insert(0,"z_score_rd")
+        carry.insert(0,"carry")
+        z_score.insert(0,"z_score")
+        tr.insert(0,"Total Return")
         #print roll_down, z_score, carry, z_score_rd, tr
-    
         return roll_down, z_score, carry, z_score_rd, tr
     except:
         return "Error"

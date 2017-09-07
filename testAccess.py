@@ -5,7 +5,9 @@ import os
 from YieldCurve import YieldCurve
 from UtilityClass import UtilityClass
 from SpotCurve import SpotCurve
-
+import openpyxl
+import xlwings as xw
+import numpy as np
 
 
 def Repair_Compact_DB(srcDB, destDB):
@@ -88,9 +90,9 @@ def analyse(df_dict):
         z_score.append(u.calc_z_score(list(df_dict['Spot'][name].values), False))
         z_score_rd.append(u.calc_z_score(list(df_roll_down[name].values), False))
 
-    return roll_down, z_score_rd, carry, z_score, tr, df_roll_down
+    return roll_down, z_score_rd, carry, z_score, tr
 
-
+'''
 def write2DB(roll_down, z_score_rd, carry, z_score, tr):
     """write all input lists to Access DataBase"""
     header = ['3m', '6m', '1y', '2y', '3y', '5y', '10y'] # Tenor as Key
@@ -100,9 +102,40 @@ def write2DB(roll_down, z_score_rd, carry, z_score, tr):
         sql = "INSERT INTO Results VALUES(%r,%r,%r,%r,%r,%r )" % (
         header[i], roll_down[i], z_score[i], tr[i], z_score_rd[i], carry[i])
         crsr.execute(sql)
+'''
+def write2XL(roll_down, z_score_rd, carry, z_score, tr):
+    header = ['3m', '6m', '1y', '2y', '3y', '5y', '10y']
+    values=['roll_down', 'z_score_rd', 'carry', 'z_score', 'tr']
+    wb=openpyxl.load_workbook(filename = 'out.xlsx')
+    ws=wb['Sheet1']
+    #ws2 = wb.create_sheet(title="Pi")
+    for i in range(5):
+        ws.cell(row=i+2,column=1,value=values[i])
+    for i, value in enumerate(header):
+        ws.cell(column=i+2,row=1,value=value)
+    rr= list(zip(roll_down, z_score_rd, carry, z_score, tr))
+    for i, each in enumerate(rr):
+        for j in range(len(each)):
+            ws.cell(row=j+2,column=i+2,value=each[j])
+    wb.save('out.xlsx')         
+ 
+@xw.func
+@xw.ret(expand='table')   
+def test():
+    conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; '
+                'DBQ=C:\\Test.accdb;')
+    [crsr,cnxn]=Build_Access_Connect(conn_str)
+    df_dict=Tables2DF(crsr)
+    [roll_down, z_score_rd, carry, z_score, tr]=analyse(df_dict)
+    cnxn.close()
+    return roll_down
+
+
 
 
 if __name__ == "__main__":
+    
+    '''
     conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; '
                 'DBQ=C:\\Test.accdb;')
 
@@ -115,8 +148,8 @@ if __name__ == "__main__":
     [roll_down, z_score_rd, carry, z_score, tr,df]=analyse(df_dict)
     #write2DB(roll_down, z_score_rd, carry, z_score, tr) # uncomment to write results to DataBase
     
-    print roll_down
-    print z_score
+    write2XL(roll_down, z_score_rd, carry, z_score, tr)
+    
     
     cnxn.commit()
-    cnxn.close()
+    cnxn.close()'''
