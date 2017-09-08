@@ -35,13 +35,13 @@ class UtilityClass:
         symmetric -- a boolean variable indicating whether the series is symmetric
         """
         
-        zscore=[]
+        
         series_list=df[df.columns[0]].values
         idx=df.index.tolist()
         idx_now=idx[-1]
-        zscore.append(UtilityClass.z_score(series_list,symmetric))
-        
-        if choice is not None:
+        zscore=UtilityClass.z_score(series_list,symmetric)
+        if choice != ():
+            zscore=[zscore]
             for each in choice:
                 if each=='1d':
                     while True:
@@ -83,9 +83,10 @@ class UtilityClass:
         idx=df.index.tolist()
         idx_now=idx[-1]
         #print series_list[-1]
-        pctl.append(stats.percentileofscore(series_list,series_list[-1],kind='weak'))
+        pctl=stats.percentileofscore(series_list,series_list[-1],kind='weak')
         
-        if choice is not None:
+        if choice != ():
+            pctl=[pctl]
             for each in choice:
                 if each=='1d':
                     while True:
@@ -120,13 +121,14 @@ class UtilityClass:
         series_list -- list of returns to be analysed
         perctl -- target percentile e.g 25 means the method returns a value of 25% percentile of the list
         """
-        lvl=[]
+     
         series_list=df.values.tolist()
         idx=df.index.tolist()
         idx_now=idx[-1]
-        lvl.append(np.percentile(series_list, perctl))
+        lvl=np.percentile(series_list, perctl)
         
-        if choice is not None:
+        if choice != ():
+            lvl=[lvl]
             for each in choice:
                 if each=='1d':
                     while True:
@@ -152,8 +154,8 @@ class UtilityClass:
                     lvl.append(np.percentile(series_list, perctl))      
         return lvl
         
-'''
 
+'''
 if __name__ == "__main__":
     today=datetime.date.today()
     dates=[]
@@ -161,7 +163,7 @@ if __name__ == "__main__":
         dd=today-datetime.timedelta(days=1+i)
         dates.insert(0,dd)
     
-    s = pd.Series(range(100), index=dates)
+    s = pd.DataFrame(range(100), index=dates)
     u=UtilityClass()
     Result=[]
     Result.append(u.calc_z_score(s,True))
