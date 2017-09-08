@@ -160,7 +160,7 @@ def DF_Merge(key,value,heads,flds,start,end):
     Dictionary of DataFrame
     """    
     #print key,value,heads,flds,start,end
-    data=bdh(value,flds,start,end,periodselection='WEEKLY')
+    data=bdh(value,flds,start,end)
     count=0 
     headers=dict(zip(value,heads))
     for key, each in data.items():
@@ -193,9 +193,9 @@ def removeUni(l):
 @xw.arg('heads', np.array, ndim=2)
 #@xw.ret(expand='table')   
 def testBLP(heads, spot,fwd,startD,endD):
- """xlwings User Define Function
-    Can be imported to Excel document
- """
+    """xlwings User Define Function
+       Can be imported to Excel document
+    """
     try:
         heads=removeUni(heads[0])
         #print heads
@@ -243,8 +243,7 @@ def testBLP(heads, spot,fwd,startD,endD):
         #cnxn.close()
         
     
-    
-'''
+
 if __name__ == "__main__":
     print "HistoryDataExtraction"
     try:
@@ -287,4 +286,4 @@ if __name__ == "__main__":
     except :
         print "Ctrl+C pressed. Stopping..."
         cnxn.commit()
-        cnxn.close()'''
+        cnxn.close()

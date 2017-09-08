@@ -65,6 +65,10 @@ def spread (t1, t2, *args,**kwargs):
     Output: dictionary of results with key as table names and values as a list of zscore and 
             percentile.
     """
+    tenorDict = {'3m': 0.25, '6m': 0.5, '9m': 0.75, '1y': 1, '2y': 2, '3y': 3, '4y': 4, '5y': 5, '6y': 6, '7y': 7,
+                 '8y': 8, '9y': 9, '10y': 10, '20y': 20, '30y': 30}
+    t1=tenorDict[t1]
+    t2=tenorDict[t2]
     u=UtilityClass()
     # Build Connnect with database
     conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; '
@@ -106,6 +110,11 @@ def butterfly(t1,t2,t3,*args, **kwargs):
     Output: dictionary of results with key as table names and values as a list of zscore and 
             percentile of last butterfly.
     """
+    tenorDict = {'3m': 0.25, '6m': 0.5, '9m': 0.75, '1y': 1, '2y': 2, '3y': 3, '4y': 4, '5y': 5, '6y': 6, '7y': 7,
+                 '8y': 8, '9y': 9, '10y': 10, '20y': 20, '30y': 30}
+    t1=tenorDict[t1]
+    t2=tenorDict[t2]
+    t3=tenorDict[t3]
     u=UtilityClass()
     conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; '
                 'DBQ=C:\\Test.accdb;')
@@ -131,8 +140,57 @@ def butterfly(t1,t2,t3,*args, **kwargs):
         result[key]=tuple([u.calc_z_score(spread_pd,False,*args),u.calc_percentile(spread_pd,*args)])
     cnxn.close()
     return result
+'''
+def test_FRA(t1,t2):
+    conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; '
+                'DBQ=C:\\Test.accdb;')
+    [crsr,cnxn]=testAccess.Build_Access_Connect(conn_str)
+    df_dict={}
+    tbls = crsr.tables(tableType='TABLE').fetchall() # select all tables from database
+    # extract all table names
+    tbls_names=[]
+    for tbl in tbls:
+        tbls_names.append(str(tbl.table_name)) 
+    # select part of the database     
+    for each in tbls_names:
+        #select last index in current database
+        idx_last=crsr.execute("select top 1 [Date] from "+str(each)+" order by [Date] desc").fetchone()[0]
+        #Compute the begining date of period
+        dd=idx_last-datetime.timedelta(days=30) 
+        #Select all data later than begining date
+        crsr.execute("select * from "+str(each)+" where [Date]>=?", dd)
+        #Fetch all data
+        val_list = []
+        while True:
+            row = crsr.fetchone()
+            if row is None:
+                break
+            val_list.append(list(row))
+        # get column names of database
+        header=[]
+        for col in crsr.columns(table=tbl.table_name):
+            header.append(col[3])
+        # Create a dataframe    
+        temp_df = pd.DataFrame(val_list, columns=header)
+        temp_df.set_index(keys=header[0], inplace=True) # First Column [Date] as Key
+        df_dict[each]=temp_df # return dictionary of dataframes
+    print df_dict 
+    for key, df in df_dict.items():
+        header = list(df)
+        index = df.index
+        vals_list = df.values.tolist()
+        FRA=[]
+        for vals in vals_list:
+            kwarg = dict(zip(header, vals))
+            yieldcurve = YieldCurve(**kwarg)
+            FRA.append(yieldcurve.calc_FRA(t1,t2,360)) # Compute butterfly from each curve
+        FRA_pd=pd.DataFrame(FRA, index=index) # create database
+        print FRA_pd
+        #result[key]=tuple([u.calc_z_score(spread_pd,False,*args),u.calc_percentile(spread_pd,*args)])
+    cnxn.close()
+'''   
    
 if __name__ == "__main__":
-  print  spread(2,5,LookBackWindow='1y')
-  print butterfly(2,5,10,'1d','1w',LookBackWindow='1y')
-   
+  print  spread('2y','5y',LookBackWindow='1y')
+  print butterfly('2y','5y','10y','1d','1w',LookBackWindow='1y')
+  #test_FRA('1y','2y') 
