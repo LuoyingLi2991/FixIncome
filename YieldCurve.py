@@ -22,9 +22,9 @@ class YieldCurve:
         """Build a cubic spline curve with given yields
 
         Argument:
-        interpolate_tenor -- list of points in form of double number eg.[3.74,3.75]
+        interpolate_tenor -- list of points in form of double number e.g [3.74,3.75] or a single tenor point   e.g 3.5
 
-        Output: List of yields with respect to the given tenors
+        Output: List of yields with respect to the given tenors or a single yield if there is only one tenor
         """
 
         tenors = []
@@ -34,13 +34,18 @@ class YieldCurve:
             yields.append(self.yieldDict[key])
         #print(tenors)
         #print(yields)
+        if isinstance(interpolate_tenor, int):
+            interpolate_tenor=[interpolate_tenor]
         try:
             for each in interpolate_tenor:
                 if each<np.min(tenors):
                     raise ValueError
             fit_curve = interpolate.interp1d(tenors, yields, kind='cubic')  # cubit spline interpolation
             #print(list(fit_curve(interpolate_tenor)))
-            return list(fit_curve(interpolate_tenor))
+            if len(interpolate_tenor)==1:
+                return fit_curve(interpolate_tenor[0])
+            else:
+                return list(fit_curve(interpolate_tenor))
 
         except (Exception) :
             print("Error: one of the interpolate tenor is too small")
@@ -65,33 +70,42 @@ class YieldCurve:
         zip_lists = zip(yields1, yields2)
         return [x-y for x,y in zip_lists]
     
-    def calc_FRA(self,t1,t2,DayCount,**kwargs):
+    def calc_FRA(self,t1,t2,*DayCount,**kwargs):
         """Calculate FRA between t1 and t2
         Argument:
             t1    -- e.g '3m'
             t2    -- e.g '1y'  Contract period is then t2-t1.
-            Daycount  -- two choices: 360 or 365
+            Daycount  -- two choices: 360 or 365. Exist together with **kwargs
             **kwargs  -- key word arguments. Required key words: n1 and n2
                          e.g  n1=91, n1 refers to the actual days in period tenor1
                               n2=183, n2 refers to the actual days in period tenor2
         Output:
             Annulised FRA rate bwteen t1 and t2
         """
-        t1=YieldCurve.tenorDict[t1]
-        t2=YieldCurve.tenorDict[t2]
-        rate1=self.build_curve(t1)
-        rate2=self.build_curve(t2)
+        t1=YieldCurve.tenorDict[t1]  # change string to number
+        t2=YieldCurve.tenorDict[t2]  # change string to number
+        rates=self.build_curve([t1,t2])  # get interpolated rate for t1,t2
+        #print t1, t2, rates
         
         if kwargs=={}:
-            return (1+rate2*t2)/(1+rate1*t1)
-        else:
+            return ((1+rates[1]*t2)/(1+rates[0]*t1)-1)/(t2-t1) # if no actual days, set as 90/360 convention
+        else: # else, go with actual date count convention
             n1=kwargs['n1']
             n2=kwargs['n2']
             nf=n2-n1
-            return (rate2*n2-rate1*n1)/nf/(1+rate1*n1/DayCount)
+            return (rates[1]*n2-rates[0]*n1)/nf/(1+rates[0]*n1/DayCount[0])
         
-            
-        
+'''     
+if __name__ == "__main__":
+    kwargs = {'1y': np.log(1), '2y': np.log(2), '4y': np.log(4),'6y': np.log(6),
+              '7y': np.log(7), '9y': np.log(9), '10y': np.log(10)}
+    yy = YieldCurve(**kwargs)
+    print yy.build_curve(3)
+    print yy.calc_FRA('3y','5y')
+    print yy.calc_FRA('3y','5y',360)
+    print yy.calc_FRA('3y','5y',365,n1=730,n2=1461)
+''' 
+    
     
 
 
