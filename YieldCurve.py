@@ -64,6 +64,34 @@ class YieldCurve:
         yields2 = self.build_curve([x-y for x,y in zip_tenors])
         zip_lists = zip(yields1, yields2)
         return [x-y for x,y in zip_lists]
-
+    
+    def calc_FRA(self,t1,t2,DayCount,**kwargs):
+        """Calculate FRA between t1 and t2
+        Argument:
+            t1    -- e.g '3m'
+            t2    -- e.g '1y'  Contract period is then t2-t1.
+            Daycount  -- two choices: 360 or 365
+            **kwargs  -- key word arguments. Required key words: n1 and n2
+                         e.g  n1=91, n1 refers to the actual days in period tenor1
+                              n2=183, n2 refers to the actual days in period tenor2
+        Output:
+            Annulised FRA rate bwteen t1 and t2
+        """
+        t1=YieldCurve.tenorDict[t1]
+        t2=YieldCurve.tenorDict[t2]
+        rate1=self.build_curve(t1)
+        rate2=self.build_curve(t2)
+        
+        if kwargs=={}:
+            return (1+rate2*t2)/(1+rate1*t1)
+        else:
+            n1=kwargs['n1']
+            n2=kwargs['n2']
+            nf=n2-n1
+            return (rate2*n2-rate1*n1)/nf/(1+rate1*n1/DayCount)
+        
+            
+        
+    
 
 
