@@ -117,42 +117,6 @@ def Tables2DF(crsr,*selected_table_name,**LookBackWindow):
              temp_df.set_index(keys=header[0], inplace=True) # First Column [Date] as Key
              df_dict[each]=temp_df # return dictionary of dataframes
          return df_dict
-                      
-@xw.func
-def PlotSpot(db_str, fDir):
-    """xlwings function: Plot 'Today', '1 Week Before', 1 Month Before' Spot Yield Curves
-    Argument:
-        db_str:database file directory in string format
-        fDir: output file directory
-    """
-    db_str= 'DBQ='+str(db_str)   
-    conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + db_str)  #Create database connection string
-    [crsr,cnxn]=Build_Access_Connect(conn_str) #Build Connection with database
-    sht=xw.Book(fDir).sheets[0]  # Get sheet address
-    idx_last=crsr.execute("select top 1 [Date] from Spot"+" order by [Date] desc").fetchone()[0] # Get Last Date
-    Last_W=idx_last-datetime.timedelta(weeks=1) # Get Date one week before
-    Last_M=idx_last-datetime.timedelta(days=30) # Get Date one Month before
-    Data_now=list(crsr.execute("select * from  Spot where [Date]=?", idx_last).fetchone()) # get Last line data
-    while crsr.execute("select * from  Spot where [Date]=?", Last_W).fetchone()==None: 
-        Last_W=Last_W-datetime.timedelta(days=1) 
-    Data_LastW=list(crsr.execute("select * from  Spot where [Date]=?", Last_W).fetchone())  # get data one week before
-    while crsr.execute("select * from  Spot where [Date]=?", Last_M).fetchone()==None:
-        Last_W=Last_W-datetime.timedelta(days=1)
-    Data_LastM=list(crsr.execute("select * from  Spot where [Date]=?", Last_M).fetchone()) # get data one week before
-    header=[]
-    for col in crsr.columns(table='Spot'): # get column names 
-        header.append(col[3])
-    values=[Data_now,Data_LastW,Data_LastM]
-    df = pd.DataFrame(values, columns=header) # Create a dataframe
-    df.set_index(keys=header[0], inplace=True) # set date as key
-    df=df.T # Transpose the dataframe
-    ax = df.plot(legend=False,title="Spot Curve") # plot the dataframe 
-    ax.legend(["Today","1W Before","1M Before"])
-    fig = ax.get_figure() # get figure from plot
-    plot=sht.pictures.add(fig, left=sht.range("B5:L23").left,top=sht.range("B5:L23").top) # put figure to the sheet
-    plot.height=200  # set figure size
-    plot.width = 300  # set figure size
-
 
 @xw.func
 #@xw.ret(expand='table')
@@ -396,6 +360,30 @@ def TRTable(db_str, LookBackWindow):
     cnxn.close()
     return rlt
 
+@xw.func
+def SpotCurveLvLs(db_str):
+    db_str= 'DBQ='+str(db_str)   
+    conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + db_str)  #Create database connection string
+    [crsr,cnxn]=Build_Access_Connect(conn_str) #Build Connection with database
+    idx_last=crsr.execute("select top 1 [Date] from Spot"+" order by [Date] desc").fetchone()[0] # Get Last Date
+    Last_W=idx_last-datetime.timedelta(weeks=1) # Get Date one week before
+    Last_M=idx_last-datetime.timedelta(days=30) # Get Date one Month before
+    Data_now=list(crsr.execute("select * from  Spot where [Date]=?", idx_last).fetchone()) # get Last line data
+    while crsr.execute("select * from  Spot where [Date]=?", Last_W).fetchone()==None: 
+        Last_W=Last_W-datetime.timedelta(days=1) 
+    Data_LastW=list(crsr.execute("select * from  Spot where [Date]=?", Last_W).fetchone())  # get data one week before
+    while crsr.execute("select * from  Spot where [Date]=?", Last_M).fetchone()==None:
+        Last_W=Last_W-datetime.timedelta(days=1)
+    Data_LastM=list(crsr.execute("select * from  Spot where [Date]=?", Last_M).fetchone()) # get data one week before
+    header=[]
+    for col in crsr.columns(table='Spot'): # get column names 
+        header.append(col[3])
+    values=[Data_now,Data_LastW,Data_LastM]
+    df = pd.DataFrame(values, columns=header) # Create a dataframe
+    df.drop('Date', axis=1, inplace=True)
+    idx=[["Last Date","1W Before","1M Before"]] # set index, list of list
+    df.set_index(idx, inplace=True)
+    return df
 
 if __name__ == "__main__":
     #conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; '
@@ -404,7 +392,7 @@ if __name__ == "__main__":
     LB='1y'
     #[crsr,cnxn]=Build_Access_Connect(conn_str)
     #PlotSpot(crsr)
-    sss= TRTable(dbstr,LB)
+    sss= SpotCurveLvLs(dbstr)
     
     #Tables2DF(crsr,LB='2y')
     
