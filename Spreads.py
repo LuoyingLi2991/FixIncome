@@ -7,7 +7,7 @@ Created on Thu Sep 07 12:12:29 2017
 import testAccess
 from YieldCurve import YieldCurve
 from UtilityClass import UtilityClass
-import datetime
+#import datetime
 import pandas as pd
 from dateutil.relativedelta import relativedelta
 
@@ -31,7 +31,7 @@ def SelectFTable2DF(crsr, LookBackWindow):
     for each in tbls_names:
         #select last index in current database
         idx_last=crsr.execute("select top 1 [Date] from "+str(each)+" order by [Date] desc").fetchone()[0]
-        #Compute the begining date of period
+        #Compute the begining date of periodgit 
         dd=idx_last-relativedelta(years=dict_Para[LookBackWindow]) 
         #Select all data later than begining date
         crsr.execute("select * from "+str(each)+" where [Date]>=?", dd)
@@ -65,10 +65,10 @@ def spread (t1, t2, *args,**kwargs):
     Output: dictionary of results with key as table names and values as a list of zscore and 
             percentile.
     """
-    tenorDict = {'3m': 0.25, '6m': 0.5, '9m': 0.75, '1y': 1, '2y': 2, '3y': 3, '4y': 4, '5y': 5, '6y': 6, '7y': 7,
+    #tenorDict = {'3m': 0.25, '6m': 0.5, '9m': 0.75, '1y': 1, '2y': 2, '3y': 3, '4y': 4, '5y': 5, '6y': 6, '7y': 7,
                  '8y': 8, '9y': 9, '10y': 10, '20y': 20, '30y': 30}
-    t1=tenorDict[t1]
-    t2=tenorDict[t2]
+    #t1=tenorDict[t1]
+    #t2=tenorDict[t2]
     u=UtilityClass()
     # Build Connnect with database
     conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; '
@@ -91,7 +91,7 @@ def spread (t1, t2, *args,**kwargs):
             temp=yieldcurve.build_curve([t1,t2])
             spreads.append(temp[1]-temp[0])
         spread_pd=pd.DataFrame(spreads, index=index) # dataframe of spreads
-        result[key]=tuple([u.calc_z_score(spread_pd,False,*args),u.calc_percentile(spread_pd,*args)])
+        result[key]=[u.calc_z_score(spread_pd,False,*args),u.calc_percentile(spread_pd,*args)]
     cnxn.close() # close database connection
     return result
 
@@ -137,7 +137,7 @@ def butterfly(t1,t2,t3,*args, **kwargs):
             spreads.append(2*temp[1]-temp[0]-temp[2]) # Compute butterfly from each curve
         spread_pd=pd.DataFrame(spreads, index=index) # create database
         #print spread_pd
-        result[key]=tuple([u.calc_z_score(spread_pd,False,*args),u.calc_percentile(spread_pd,*args)])
+        result[key]=[u.calc_z_score(spread_pd,False,*args),u.calc_percentile(spread_pd,*args)]
     cnxn.close()
     return result
 '''

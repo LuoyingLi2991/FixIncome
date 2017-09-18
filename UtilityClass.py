@@ -33,6 +33,7 @@ class UtilityClass:
         Arguments:
         df -- a dataframe to be analysed
         symmetric -- a boolean variable indicating whether the series is symmetric
+        
         """
         
         
@@ -40,8 +41,10 @@ class UtilityClass:
         idx=df.index.tolist()
         idx_now=idx[-1]
         zscore=UtilityClass.z_score(series_list,symmetric)
+        lvl=series_list[-1]
         if choice != ():
             zscore=[zscore]
+            lvl=[lvl]
             for each in choice:
                 if each=='1d':
                     while True:
@@ -51,6 +54,7 @@ class UtilityClass:
                     df1=df.loc[: lastD]
                     series_list=df1[df1.columns[0]].values
                     #print series_list
+                    lvl.append(series_list[-1])
                     zscore.append(UtilityClass.z_score(series_list,symmetric))
                 if each=='1w':
                     lastW=idx_now-datetime.timedelta(weeks=1)
@@ -58,6 +62,7 @@ class UtilityClass:
                         lastW=lastW-datetime.timedelta(days=1)
                     df1=df.loc[: lastW]
                     series_list=df1[df1.columns[0]].values
+                    lvl.append(series_list[-1])
                     zscore.append(UtilityClass.z_score(series_list,symmetric))
                 if each=='1m':
                     lastM=idx_now-datetime.timedelta(days=30)
@@ -65,9 +70,10 @@ class UtilityClass:
                         lastM=lastM-datetime.timedelta(days=1)
                     df1=df.loc[: lastM]
                     series_list=df1[df1.columns[0]].values
+                    lvl.append(series_list[-1])
                     zscore.append(UtilityClass.z_score(series_list,symmetric))
         #print zscore
-        return zscore        
+        return lvl, zscore        
                                                
 
     @staticmethod
@@ -83,7 +89,7 @@ class UtilityClass:
         idx=df.index.tolist()
         idx_now=idx[-1]
         #print series_list[-1]
-        pctl=stats.percentileofscore(series_list,series_list[-1],kind='weak')
+        pctl=stats.percentileofscore(series_list,series_list[-1],kind='weak')/100
         
         if choice != ():
             pctl=[pctl]
@@ -95,21 +101,21 @@ class UtilityClass:
                             break
                     df1=df.loc[: lastD]
                     series_list=df1[df1.columns[0]].values
-                    pctl.append(stats.percentileofscore(series_list,series_list[-1],kind='weak'))
+                    pctl.append(stats.percentileofscore(series_list,series_list[-1],kind='weak')/100)
                 if each=='1w':
                     lastW=idx_now-datetime.timedelta(weeks=1)
                     while lastW not in idx:
                         lastW=lastW-datetime.timedelta(days=1)
                     df1=df.loc[: lastW]
                     series_list=df1[df1.columns[0]].values
-                    pctl.append(stats.percentileofscore(series_list,series_list[-1],kind='weak'))
+                    pctl.append(stats.percentileofscore(series_list,series_list[-1],kind='weak')/100)
                 if each=='1m':
                     lastM=idx_now-datetime.timedelta(days=30)
                     while lastM not in idx:
                         lastM=lastM-datetime.timedelta(days=1)
                     df1=df.loc[: lastM]
                     series_list=df1[df1.columns[0]].values
-                    pctl.append(stats.percentileofscore(series_list,series_list[-1],kind='weak'))      
+                    pctl.append(stats.percentileofscore(series_list,series_list[-1],kind='weak')/100)      
         return pctl
 
 

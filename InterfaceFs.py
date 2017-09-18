@@ -227,20 +227,19 @@ def RollDownTable(db_str, LookBackWindow):
     else: df=Tables2DF(crsr,'Spot').values()[0]
     cols = list(df)
     indx = df.index
-    Index=np.asarray(cols)
-    prd = ['3m'] * (len(cols) - 1)
+    Index=np.asarray(cols[1:])
+    prd = ['3m'] * len(cols)
     roll_down_list = []
     vals_list = df.values.tolist()
     for vals in vals_list:
         kwarg = dict(zip(cols, vals))
         yieldcurve = YieldCurve(**kwarg)
         temp = yieldcurve.calc_roll_down(cols[1:], prd)
-        temp.insert(0, vals[0])
         roll_down_list.append(temp)
-    df_roll_down = pd.DataFrame(roll_down_list, index=indx,columns=cols) 
+    df_roll_down = pd.DataFrame(roll_down_list, index=indx,columns=cols[1:]) 
     #print df_roll_down
     Values=[]
-    for each in cols:  
+    for each in cols[1:]:  
         s=df_roll_down[each]
         temp=pd.DataFrame(s,index=indx) # For each column, create a df and pass to calc z score and percentile
         [lvl,zscore]=u.calc_z_score(temp,False,'1w','1m')
@@ -276,8 +275,8 @@ def CarryTable(db_str, LookBackWindow):
     fwd=df[1]
     cols = list(spot)
     indx = spot.index
-    Index=np.asarray(cols)
-    prd = ['3m'] * (len(cols) - 1)
+    Index=np.asarray(cols[1 :])
+    prd = ['3m'] * len(cols)
     carry_list = []
     vals_s = spot.values.tolist()
     vals_f = fwd.values.tolist()
@@ -286,14 +285,14 @@ def CarryTable(db_str, LookBackWindow):
         f_dict = dict(zip(cols, f))
         SC = SpotCurve(s_dict,f_dict)
         temp = SC.calc_carry(cols[1:], prd)
-        temp.insert(0, -s[0])
         carry_list.append(temp)
     df_carry = pd.DataFrame(carry_list, index=indx,
-                                columns=cols) 
+                                columns=cols[1 :]) 
     Values=[]
-    for each in cols:
+    for each in cols[1 :]:
         s=df_carry[each]
         temp=pd.DataFrame(s,index=indx)
+        print temp
         [lvl,zscore]=u.calc_z_score(temp,False,'1w','1m')
         ptl=u.calc_percentile(temp,'1w','1m')
         row=[]
@@ -327,8 +326,8 @@ def TRTable(db_str, LookBackWindow):
     fwd=df[1]
     cols = list(spot)
     indx = spot.index
-    Index=np.asarray(cols)
-    prd = ['3m'] * (len(cols) - 1)
+    Index=np.asarray(cols[1 :])
+    prd = ['3m'] * len(cols)
     TR_list = []
     vals_s = spot.values.tolist()
     vals_f = fwd.values.tolist()
@@ -336,14 +335,13 @@ def TRTable(db_str, LookBackWindow):
         s_dict = dict(zip(cols, s))
         f_dict = dict(zip(cols, f))
         SC = SpotCurve(s_dict,f_dict)
-        temp = SC.calc_total_return(cols[1:], prd)
-        temp.insert(0, 0.0001)
+        temp = SC.calc_total_return(cols[1 :], prd)
         TR_list.append(temp)
     df_TR = pd.DataFrame(TR_list, index=indx,
-                                columns=cols) 
+                                columns=cols[1 :]) 
     #print df_TR
     Values=[]
-    for each in cols:
+    for each in cols[1 :]:
         s=df_TR[each]
         temp=pd.DataFrame(s,index=indx)
         #print temp
@@ -361,29 +359,39 @@ def TRTable(db_str, LookBackWindow):
     return rlt
 
 @xw.func
-def SpotCurveLvLs(db_str):
+def SpotCurveLvLs(db_str,LookBackWindow):
     db_str= 'DBQ='+str(db_str)   
     conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + db_str)  #Create database connection string
     [crsr,cnxn]=Build_Access_Connect(conn_str) #Build Connection with database
-    idx_last=crsr.execute("select top 1 [Date] from Spot"+" order by [Date] desc").fetchone()[0] # Get Last Date
-    Last_W=idx_last-datetime.timedelta(weeks=1) # Get Date one week before
-    Last_M=idx_last-datetime.timedelta(days=30) # Get Date one Month before
-    Data_now=list(crsr.execute("select * from  Spot where [Date]=?", idx_last).fetchone()) # get Last line data
-    while crsr.execute("select * from  Spot where [Date]=?", Last_W).fetchone()==None: 
-        Last_W=Last_W-datetime.timedelta(days=1) 
-    Data_LastW=list(crsr.execute("select * from  Spot where [Date]=?", Last_W).fetchone())  # get data one week before
-    while crsr.execute("select * from  Spot where [Date]=?", Last_M).fetchone()==None:
-        Last_W=Last_W-datetime.timedelta(days=1)
-    Data_LastM=list(crsr.execute("select * from  Spot where [Date]=?", Last_M).fetchone()) # get data one week before
-    header=[]
-    for col in crsr.columns(table='Spot'): # get column names 
-        header.append(col[3])
-    values=[Data_now,Data_LastW,Data_LastM]
-    df = pd.DataFrame(values, columns=header) # Create a dataframe
-    df.drop('Date', axis=1, inplace=True)
-    idx=[["Last Date","1W Before","1M Before"]] # set index, list of list
-    df.set_index(idx, inplace=True)
-    return df
+    headers = [np.array(['today', 'today', 'today','1W Before', '1W Before', '1W Before', '1M Before','1M Before' ,'1M Before']),
+              np.array(['Level', 'Z score', 'Percentile', 'Level', 'Z score', 'Percentile', 'Level', 'Z score', 'Percentile'])]
+    u=UtilityClass()
+    if str(LookBackWindow)!="ALL":
+        df=Tables2DF(crsr,'Spot',LB=str(LookBackWindow)).values()[0]
+    else: df=Tables2DF(crsr,'Spot').values()[0]
+    cols = list(df)
+    indx = df.index
+    Index=np.asarray(cols)
+    Values=[]
+    for each in cols:
+        s=df[each]
+        temp=pd.DataFrame(s,index=indx)
+        #print temp
+        [lvl,zscore]=u.calc_z_score(temp,False,'1w','1m')
+        ptl=u.calc_percentile(temp,'1w','1m')
+        row=[]
+        for i in range (len(lvl)):
+            row.append(lvl[i])
+            row.append(zscore[i])
+            row.append(ptl[0])
+        Values.append(row)
+    tt=np.asarray(Values)
+    rlt = pd.DataFrame(tt, index=Index, columns =headers )
+    cnxn.close()
+    return rlt
+    
+    
+    
 
 if __name__ == "__main__":
     #conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; '
@@ -392,7 +400,7 @@ if __name__ == "__main__":
     LB='1y'
     #[crsr,cnxn]=Build_Access_Connect(conn_str)
     #PlotSpot(crsr)
-    sss= SpotCurveLvLs(dbstr)
-    
-    #Tables2DF(crsr,LB='2y')
+    #print TRTable(dbstr,LB)
+    s= CarryTable(dbstr,LB)
+    ##Tables2DF(crsr,LB='2y')
     
