@@ -147,10 +147,9 @@ def pd2DB (data,crsr):
             else: print "Extract Dates Range is not enough!"
    
 
-def DF_Merge(key,value,heads,flds,start,end):
-    """Merge seperate DataFrames into one TimeSeries df dict
+def DF_Merge(value,heads,flds,start,end=date.today().strftime('%Y%m%d')):
+    """Merge seperate DataFrames into one TimeSeries df
     Argument
-    key -- dictionary key
     value -- list of tickers
     flds -- list of fields
     start --start date e.g "20070101"
@@ -255,8 +254,9 @@ if __name__ == "__main__":
                  'USFS0C1  BLC Curncy','USFS0C2  BLC Curncy',
                  'USFS0C3  BLC Curncy','USFS0C5  BLC Curncy',
                  'USFS0C10 BLC Curncy']]
+       
        flds=["PX_LAST"]
-       start="20070101"
+       start="20170701"
        end="20170823"
                                 
        heads=['3m','6m','1y','2y', '3y','5y','10y']
@@ -264,26 +264,27 @@ if __name__ == "__main__":
        Inputs_dict=dict(zip(Keys,Values))
        df_dict={}
        for key,value in Inputs_dict.items():
-           df_dict[key]=DF_Merge(key,value,heads,flds,start,end)
-       #print df_dict
+           df_dict[key]=DF_Merge(value,heads,flds,start,end)
+       
+       iii=df_dict["Spot"].index[1]
+       print df_dict["Spot"].loc[iii].tolist()
        #data=bdh(["IBM US Equity","MSFT US Equity","AAPL US Equity"], ["PX_LAST","OPEN","VWAP_VOLUME"], "20170101","20170120")
        #print data
-       conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; '
-                   'DBQ=C:\\Test.accdb;')
+       #conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; '
+                   #'DBQ=C:\\Test.accdb;')
        
-       srcDB = 'C:\\Test.accdb'
-       destDB = 'C:\\Test_backup.accdb'
+       #srcDB = 'C:\\Test.accdb'
+       #destDB = 'C:\\Test_backup.accdb'
        
        #testAccess.Repair_Compact_DB(srcDB, destDB) # uncomment to repair and compact database 
-       [crsr,cnxn]=testAccess.Build_Access_Connect(conn_str) 
+       #[crsr,cnxn]=testAccess.Build_Access_Connect(conn_str) 
       
-       pd2DB(df_dict, crsr)
+       #pd2DB(df_dict, crsr)
        
-       cnxn.commit()
-       cnxn.close()
+       #cnxn.commit()
+       #cnxn.close()
        
        
     except :
         print "Ctrl+C pressed. Stopping..."
-        cnxn.commit()
-        cnxn.close()
+        

@@ -26,8 +26,12 @@ if __name__ == "__main__":
                 'DBQ=C:\\Test.accdb;')
     [crsr,cnxn]=InterfaceFs.Build_Access_Connect(conn_str)
     df=InterfaceFs.Tables2DF(crsr,'Spot',LB='1y').values()[0]
-    s=df['6m']
-    print calc_historic_vol(s, 'd')
+    
+    r=df.resample('W-FRI').last()
+    d=df.index[-1]
+    print d
+    r.rename({r.index[-1]: d}, inplace=True)# Last Date
+    
     
     
 
