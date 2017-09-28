@@ -8,6 +8,7 @@ from YieldCurve import YieldCurve
 from UtilityClass import UtilityClass
 from SpotCurve import SpotCurve
 import BLP2DF
+import datetime
 
 
 @xw.func
@@ -20,7 +21,9 @@ def updateDB(Tickers,start):
     for i,each in enumerate(tickers_list):
         tickers_list[i]=BLP2DF.removeUni(each)
     flds=["PX_LAST"]
-    start=str(int(start[0][0]))
+    #start=str(int(start[0][0]))
+    start=(datetime.date.today()-datetime.timedelta(days=60)).strftime('%Y%m%d')
+    print start
     data={}
     for name, tickers in zip(table_names,tickers_list):
         data[name]=BLP2DF.DF_Merge(tickers,headers,flds,start)
@@ -34,48 +37,58 @@ def updateDB(Tickers,start):
 @xw.func
 @xw.ret(expand='table')
 def FwdPlot(Country,db_str):
-    fwd=str(Country)+"Fwd1y"
-    spot=str(Country)+"Spot"
-    db_str= 'DBQ='+str(db_str)
+    """ Return "1y/1y-1y" DataFrame of Country
+    db_str: database directory
+    """
+    fwd=str(Country)+"Fwd1y"  # Construct 1 year forward table name
+    spot=str(Country)+"Spot"  # Construct spot table name
+    db_str= 'DBQ='+str(db_str)  
     conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + db_str)
-    [crsr,cnxn]=Build_Access_Connect(conn_str)
-    df=Tables2DF(crsr,spot,fwd)
-    fwd=df[fwd]
-    spot=df[spot]
-    tenors=list(spot)
-    t='1y'
+    [crsr,cnxn]=Build_Access_Connect(conn_str)  # Connect to MS Access
+    df=Tables2DF(crsr,spot,fwd)  # return dictionary of tables from database
+    fwd=df[fwd]  # get forward table from dictionary
+    spot=df[spot]  # get spot table from dictionary
+    tenors=list(spot)  # get tenor headers from spot table
+    t='1y'  
     
-    indx=spot.index
-    indx_fwd=fwd.index
+    indx=spot.index.tolist()  
+    indx_fwd=fwd.index.tolist()
+    dels=[]
     
-    if t in tenors:
+    if t in tenors: # no need to interpolate for 1y point
         r=[]
         for each in indx:
-            if each in indx_fwd:
+            if each in indx_fwd: # match dates between forward and spot
                 r.append(fwd.loc[each].to_dict()[t]-spot.loc[each].to_dict()[t])
             else:
-                indx.remove(each)
-    else:
+                dels.append(each) 
+        for each in dels:  # delete spot dates that are not in forward dates
+            indx.remove(each)
+    else: # interpolation is needed for 1y point
         r=[]
         for each in indx:
-            if each in indx_fwd:
+            if each in indx_fwd:  # Match dates between spot and forward dates
                 f=fwd.loc[each].tolist()
                 s=spot.loc[each].tolist()
                 f_kwarg=dict(zip(tenors,f))
                 s_kwarg=dict(zip(tenors,s))
-                y1=YieldCurve(**f_kwarg)
-                y2=YieldCurve(**s_kwarg)
-                r.append(y1.build_curve(1)-y2.build_curve(1))
+                y1=YieldCurve(**f_kwarg)  # forward interpolation for 1y point
+                y2=YieldCurve(**s_kwarg)  # spot interpolation for 1y point
+                r.append(y1.build_curve(1)-y2.build_curve(1)) # calc spread
             else:
+                dels.append(each)
+            
+        for each in dels:
                 indx.remove(each)
-        
-    rlt=pd.DataFrame(r,index=indx,columns=['1y/1y-1y'])
+   
+    rlt=pd.DataFrame(r,index=indx,columns=['1y/1y-1y'])  # Construct a dataframe
+    #  Add average value column
     rlt['Aver']=[np.mean(rlt['1y/1y-1y'].tolist())]*len(rlt['1y/1y-1y'].tolist())
     sd=np.std(rlt['1y/1y-1y'].tolist())
-    rlt['+1sd']=[rlt['Aver'].values[0]+sd]*len(rlt['1y/1y-1y'].tolist())
-    rlt['-1sd']=[rlt['Aver'].values[0]-sd]*len(rlt['1y/1y-1y'].tolist())
-    rlt['+2sd']=[rlt['Aver'].values[0]+2*sd]*len(rlt['1y/1y-1y'].tolist())
-    rlt['-2sd']=[rlt['Aver'].values[0]-2*sd]*len(rlt['1y/1y-1y'].tolist()) 
+    rlt['+1sd']=[rlt['Aver'].values[0]+sd]*len(rlt['1y/1y-1y'].tolist())  #  1 std above average
+    rlt['-1sd']=[rlt['Aver'].values[0]-sd]*len(rlt['1y/1y-1y'].tolist())  #  1 std below average
+    rlt['+2sd']=[rlt['Aver'].values[0]+2*sd]*len(rlt['1y/1y-1y'].tolist())  #  2 std above average
+    rlt['-2sd']=[rlt['Aver'].values[0]-2*sd]*len(rlt['1y/1y-1y'].tolist())  #  2 std below average
     return rlt
 
 
@@ -183,6 +196,14 @@ def Tables2DF(crsr,*selected_table_name,**LookBackWindow):
 @xw.func
 @xw.arg('TableList', np.array, ndim=2)
 def calc_historic_vol(tenors,TableList, df_list,frequency='d'):
+    """calc historical volatility of each table in df_list
+    tenors: tenor headers of each table
+    TableList: a list containing all tables in df_list
+    df_list: a dictionary containing spot and forward tables
+    frequency: frequency of data in df_list tables. default as daily data
+    Output: dictionary of volatility dataframe
+    """
+    
     ttt={}
     frequency_dict={'d':252,'w':52, 'm':12, 'a':1}
     for each in TableList:
@@ -190,11 +211,11 @@ def calc_historic_vol(tenors,TableList, df_list,frequency='d'):
         for i,col in enumerate(tenors):
             timeseries=df_list[each][col].values.tolist()
             dyields=[(timeseries[x+1]-timeseries[x]) for x in range(len(timeseries)-1)]
-            if i==0:
+            if i==0: # Create a DateFrame
                 rlt=pd.DataFrame(dyields,index=idx,columns=['dy'])
                 rlt[col] = rlt['dy'].rolling(window=66).std()*np.sqrt(frequency_dict[frequency])  # annulized three months rolling window std
                 rlt.drop('dy',1,inplace=True)
-            else:
+            else:  # Create a Series and integrate to the dataframe
                 rlt.loc[:,'dy']=pd.Series(dyields,index=idx)
                 rlt[col] = rlt['dy'].rolling(window=66).std()*np.sqrt(frequency_dict[frequency])  # annulized three months rolling window std
                 rlt.drop('dy',1,inplace=True)
@@ -212,15 +233,16 @@ def SpreadsTable(db_str, LookBackWindow,TableList):
     Arguments:
         db_str: database file directory
         LookBackWindow: Whether to select part of the table
+        TableList: a list of tables needed
+    Output: Today, 1week and 1month's spreads level,zscore(asymmetric) and percentile    
     """
-    
-    
+    tttt=datetime.datetime.now()
     Convert_dict={'2s5s':[2,5],'5s10s':[5,10],'2s10s':[2,10],'1s2s':[1,2],'2s3s':[2,3],'1s3s':[1,3],'3s5s':[3,5],'5s7s':[5,7]}
     [rlt_headers,df_list,headers,cnxn,TableList]=GenHnInDF(db_str,TableList,LookBackWindow)
-    spreads=['2s5s','5s10s','2s10s','1s2s','2s3s','1s3s','3s5s','5s7s']
+    spreads=['2s5s','5s10s','2s10s','1s2s','2s3s','1s3s','3s5s','5s7s']  # desired spreads
     temp2=[]
     
-    for t in spreads:    
+    for t in spreads:  # Construct index for result spreads
         temp2=temp2+[t]*3
     Index = [np.array(temp2), np.array(['Today', '1W Before', '1M Before']*len(spreads))]
     
@@ -229,11 +251,11 @@ def SpreadsTable(db_str, LookBackWindow,TableList):
     u=UtilityClass() 
     
     tenors=[]
-    for each in spreads:
+    for each in spreads:  # Convert and merge all spreads into one list
         for t in Convert_dict[each]:
             tenors.append(t)
-            
-    for tbl in TableList:
+        
+    for tbl in TableList:  # Compute spreads for each table
         indx = df_list[tbl].index  # get index
         vals_list = df_list[tbl].values.tolist() 
         s=[]
@@ -246,7 +268,7 @@ def SpreadsTable(db_str, LookBackWindow,TableList):
         lvl=[]
         z=[]
         p=[]
-        for each in spreads:
+        for each in spreads: # for each column in spread dataframe, compute zscore and percentile
             ss=spread_pd[each].to_frame()
             [s_lvl,s_zscore]=u.calc_z_score(ss,False,'1w','1m')
             s_ptl=u.calc_percentile(ss,'1w','1m')
@@ -257,11 +279,96 @@ def SpreadsTable(db_str, LookBackWindow,TableList):
         Values.append(z)
         Values.append(p)
     tt=np.asarray(Values) 
-    rlt = pd.DataFrame(tt, index=rlt_headers, columns =Index )
+    rlt = pd.DataFrame(tt, index=rlt_headers, columns =Index) # Construct result dataframe  
     rlt=rlt.T
     cnxn.close()
+    print datetime.datetime.now()-tttt # print time needed running this function
     return rlt
+ 
     
+@xw.func
+@xw.arg('TableList', np.array, ndim=2)
+#@xw.ret(expand='table')
+def SpreadsRDTable(db_str, LookBackWindow,TableList):
+    """For Spot Curves, return Spread Total Return
+    For Forward Curves, return Spread Roll Down
+    db_str: database file directory
+    LookBackWindow: Whether to select part of the table
+    TableList: a list of tables needed"""
+    
+    tttt=datetime.datetime.now()
+    Convert_dict={'2s5s':['2y','5y'],'5s10s':['5y','10y'],'2s10s':['2y','10y'],'1s2s':['1y','2y'],'2s3s':['2y','3y'],'1s3s':['1y','3y'],'3s5s':['3y','5y'],'5s7s':['5y','7y']}
+    
+    [rlt_headers,df_list,headers,cnxn,TableList]=GenHnInDF(db_str,TableList,LookBackWindow)
+    spreads=['2s5s','5s10s','2s10s','1s2s','2s3s','1s3s','3s5s','5s7s']
+    temp2=[]
+
+    for t in spreads:    # Construct result dateframe index
+        temp2=temp2+[t]*3
+    Index = [np.array(temp2), np.array(['Today', '1W Before', '1M Before']*len(spreads))]
+    
+    Values=[] 
+    u=UtilityClass() 
+    
+    tenors=[]
+    for each in spreads:
+        tenors=tenors+Convert_dict[each]
+    
+    prd = ['3m'] * len(tenors)
+    for each in TableList:
+        if each.endswith("Spot"):  # Find Spot curves' table name and index
+            spottbl=each
+            spot_idx=df_list[each].index.tolist()
+        if each.endswith("3m"):  # Find 3m Forward curves' table name and index
+            f3tbl=each
+            f3_idx=df_list[each].index.tolist()
+            
+    for tbl in TableList:  # iterate through all tables
+        indx=df_list[tbl].index.tolist()
+        r=[]
+        dels=[]
+        for each in indx:
+            if tbl.endswith("Spot"):  # For spot curves, compute spread total return
+                if each in f3_idx:
+                    s_dict = df_list[tbl].loc[each].to_dict()
+                    f_dict = df_list[f3tbl].loc[each].to_dict()
+                    SC = SpotCurve(s_dict,f_dict)
+                    tr=SC.calc_total_return(tenors,prd)
+                    r.append([x-y for x,y in zip(tr[1::2],tr[0::2])])
+                else: dels.append(each)
+            else:
+                if each in spot_idx:  # For forward curves, compute spread roll down
+                    s_dict = df_list[spottbl].loc[each].to_dict()
+                    f_dict = df_list[tbl].loc[each].to_dict()
+                    yy = YieldCurve(**f_dict)
+                    tr=yy.calc_roll_down(tenors,prd,s_dict,tbl[-2:])
+                    r.append([x-y for x,y in zip(tr[1::2],tr[0::2])])
+                else: dels.append(each)
+        for each in dels:
+            indx.remove(each)
+        spread_rd_pd=pd.DataFrame(r, index=indx,columns=spreads)  # Construct a spread TR dataframe
+        lvl=[]
+        z=[]
+        p=[]
+        for each in spreads:  # for each spread TR, compute level,zscore and percentile
+            ss=spread_rd_pd[each].to_frame()
+            [s_lvl,s_zscore]=u.calc_z_score(ss,False,'1w','1m')
+            s_ptl=u.calc_percentile(ss,'1w','1m')
+            lvl=lvl+s_lvl
+            z=z+s_zscore
+            p=p+s_ptl
+        Values.append(lvl)
+        Values.append(z)
+        Values.append(p)
+    tt=np.asarray(Values) 
+    rlt = pd.DataFrame(tt, index=rlt_headers, columns =Index )  # Resulted Dataframe
+    rlt=rlt.T
+    cnxn.close()
+    print datetime.datetime.now()-tttt  # print time needed running the function
+    return rlt
+
+
+
 
 @xw.func
 @xw.arg('TableList', np.array, ndim=2)
@@ -270,7 +377,9 @@ def ButterFlysTable(db_str, LookBackWindow,TableList):
     Arguments:
         db_str: database file directory
         LookBackWindow: Whether to select part of the table
+        TableList: a list of tables needed
     """
+    tttt=datetime.datetime.now()
     Convert_dict={'2s5s10s':[2,5,10],'5s7s10s':[5,7,10],'1s3s5s':[1,3,5],'3s5s7s':[3,5,7],'1s2s3s':[1,2,3]}
     [rlt_headers,df_list,headers,cnxn,TableList]=GenHnInDF(db_str,TableList,LookBackWindow)
     flys=['2s5s10s','5s7s10s','1s3s5s','3s5s7s','1s2s3s']
@@ -300,7 +409,7 @@ def ButterFlysTable(db_str, LookBackWindow,TableList):
         lvl=[]
         z=[]
         p=[]
-        for each in flys:
+        for each in flys: # For each fly, compute last data level,zscore and percentile
             ss=fly_pd[each].to_frame()
             [s_lvl,s_zscore]=u.calc_z_score(ss,False,'1w','1m')
             s_ptl=u.calc_percentile(ss,'1w','1m')
@@ -314,6 +423,7 @@ def ButterFlysTable(db_str, LookBackWindow,TableList):
     rlt = pd.DataFrame(tt, index=rlt_headers, columns =Index )
     rlt=rlt.T
     cnxn.close()
+    print datetime.datetime.now()-tttt
     return rlt
 
 
@@ -324,7 +434,9 @@ def RollDownTable(db_str, LookBackWindow,TableList):
     Arguments:
         db_str: database file directory
         LookBackWindow: Whether to select part of the table
+        TableList: a list of tables needed
     """
+    tttt=datetime.datetime.now()
     [headers,df_list,tenors,cnxn,TableList]=GenHnInDF(db_str,TableList,LookBackWindow)
     
     temp2=[]
@@ -333,26 +445,48 @@ def RollDownTable(db_str, LookBackWindow,TableList):
     Index = [np.array(temp2), np.array(['Today', '1W Before', '1M Before']*(len(tenors)-1))]
     u=UtilityClass()
 
-    prd = ['3m'] * len(tenors)
+    prd = ['3m'] * (len(tenors)-1)
+    
+    for each in TableList:
+        if each.endswith("Spot"):
+            spottbl=each
+            spot_vals=df_list[each].values.tolist()
+            spot_idx=df_list[each].index.tolist()
     
     Values=[]
     for tbl in TableList:
-        indx = df_list[tbl].index
-        vals_list = df_list[tbl].values.tolist()
-        roll_down_list = []
-        for vals in vals_list:
-            kwarg = dict(zip(tenors, vals))
-            yieldcurve = YieldCurve(**kwarg)
-            rd = yieldcurve.calc_roll_down(tenors[1:], prd)
-            roll_down_list.append(rd)
-        df_roll_down = pd.DataFrame(roll_down_list, index=indx,columns=tenors[1:]) 
-        #print df_roll_down
+        if tbl.endswith("Spot"):
+            roll_down_list = []
+            for vals in spot_vals:
+                kwarg = dict(zip(tenors, vals))
+                yieldcurve = YieldCurve(**kwarg)
+                rd = yieldcurve.calc_roll_down(tenors[1:], prd)
+                roll_down_list.append(rd)
+            df_roll_down = pd.DataFrame(roll_down_list, index=spot_idx,columns=tenors[1:]) 
+            
+        else:
+            f=tbl[-2:]
+            roll_down_list = []
+            indx=df_list[tbl].index.tolist()
+            dels=[]
+            for each in indx:
+                if each in spot_idx:
+                    s=df_list[spottbl].loc[each].to_dict()
+                    kwarg=df_list[tbl].loc[each].to_dict()
+                    y=YieldCurve(**kwarg)
+                    rd=y.calc_roll_down(tenors[1:],prd,s,f)
+                    roll_down_list.append(rd)
+                else: 
+                    dels.append(each)
+            for each in dels:
+                indx.remove(each)
+            df_roll_down = pd.DataFrame(roll_down_list, index=indx,columns=tenors[1:]) 
+            
         lvl=[]
         z=[]
         p=[]
         for each in tenors[1:]:  
-            rd=df_roll_down[each].tolist()
-            temp_rd=pd.DataFrame(rd,index=indx) # For each column, create a df and pass to calc z score and percentile
+            temp_rd=df_roll_down[each].to_frame() # For each column, create a df and pass to calc z score and percentile
             [rd_lvl,rd_zscore]=u.calc_z_score(temp_rd,False,'1w','1m')
             rd_ptl=u.calc_percentile(temp_rd,'1w','1m')
             lvl=lvl+rd_lvl
@@ -365,6 +499,7 @@ def RollDownTable(db_str, LookBackWindow,TableList):
     rlt = pd.DataFrame(tt, index=headers, columns =Index )
     rlt=rlt.T
     cnxn.close()
+    print datetime.datetime.now()-tttt
     return rlt
     
 @xw.func
@@ -375,6 +510,7 @@ def AdjRollDownTable(db_str, LookBackWindow,TableList):
         db_str: database file directory
         LookBackWindow: Whether to select part of the table
     """
+    tttt=datetime.datetime.now()
     [headers,df_list,tenors,cnxn,TableList]=GenHnInDF(db_str,TableList,LookBackWindow)
     vol_dict=calc_historic_vol(tenors,TableList, df_list)
 
@@ -384,29 +520,56 @@ def AdjRollDownTable(db_str, LookBackWindow,TableList):
     Index = [np.array(temp2), np.array(['Today', '1W Before', '1M Before']*(len(tenors)-1))]
     u=UtilityClass()
 
-    prd = ['3m'] * len(tenors)
+    prd = ['3m'] * (len(tenors)-1)
+    
+    for each in TableList:
+        if each.endswith("Spot"):
+            spottbl=each
+            spot_vals=df_list[each].values.tolist()
+            spot_idx=df_list[each].index.tolist()
     
     Values=[]
     for tbl in TableList:
-        vol_start=vol_dict[tbl].index[0]
-        df_list[tbl]=df_list[tbl].loc[vol_start :]
-        indx = df_list[tbl].index
-        vals_list = df_list[tbl].values.tolist()
-        roll_down_list = []
-        for vals in vals_list:
-            kwarg = dict(zip(tenors, vals))
-            yieldcurve = YieldCurve(**kwarg)
-            rd = yieldcurve.calc_roll_down(tenors[1:], prd)
-            roll_down_list.append(rd)
-        df_roll_down = pd.DataFrame(roll_down_list, index=indx,columns=tenors[1:]) 
+        if tbl.endswith("Spot"):
+            roll_down_list = []
+            for vals in spot_vals:
+                kwarg = dict(zip(tenors, vals))
+                yieldcurve = YieldCurve(**kwarg)
+                rd = yieldcurve.calc_roll_down(tenors[1:], prd)
+                roll_down_list.append(rd)
+            df_roll_down = pd.DataFrame(roll_down_list, index=spot_idx,columns=tenors[1:]) 
+            
+        else:
+            f=tbl[-2:]
+            roll_down_list = []
+            indx=df_list[tbl].index.tolist()
+            dels=[]
+            for each in indx:
+                if each in spot_idx:
+                    s=df_list[spottbl].loc[each].to_dict()
+                    kwarg=df_list[tbl].loc[each].to_dict()
+                    y=YieldCurve(**kwarg)
+                    rd=y.calc_roll_down(tenors[1:],prd,s,f)
+                    roll_down_list.append(rd)
+                else: 
+                    dels.append(each)
+            for each in dels:
+                indx.remove(each)
+            df_roll_down = pd.DataFrame(roll_down_list, index=indx,columns=tenors[1:]) 
         lvl=[]
         z=[]
         p=[]
-        for each in tenors[1:]: 
-            vols=vol_dict[tbl][each].tolist()
-            rd=df_roll_down[each].tolist()
-            adj_rd=[x/y for x,y in zip(rd,vols)]
-            temp_adj_rd=pd.DataFrame(adj_rd,index=indx) # For each column, create a df and pass to calc z score and percentile
+        
+        for each in tenors[1:]:
+            df_vol=vol_dict[tbl]
+            start=df_vol.index[0]
+            df=df_roll_down.loc[start :]
+            if not tbl.endswith("Spot"):
+                df_vol=df_vol.loc[df.index]
+            vols=df_vol[each].tolist()
+            rd=df[each].tolist()
+            adj_rd=[x/yy for x,yy in zip(rd,vols)]
+            temp_adj_rd=pd.DataFrame(adj_rd,index=df.index) # For each column, create a df and pass to calc z score and percentile
             [rd_lvl,rd_zscore]=u.calc_z_score(temp_adj_rd,False,'1w','1m')
             rd_ptl=u.calc_percentile(temp_adj_rd,'1w','1m')
             lvl=lvl+rd_lvl
@@ -419,6 +582,7 @@ def AdjRollDownTable(db_str, LookBackWindow,TableList):
     rlt = pd.DataFrame(tt, index=headers, columns =Index )
     rlt=rlt.T
     cnxn.close()
+    print datetime.datetime.now()-tttt
     return rlt
 
 @xw.func
@@ -429,7 +593,7 @@ def CarryTable(db_str, LookBackWindow, TableList):
         db_str: database file directory
         LookBackWindow: Whether to select part of the table
     """
-    
+    tttt=datetime.datetime.now()
     TableList=BLP2DF.removeUni(np.delete(TableList[0], 0))
     db_str= 'DBQ='+str(db_str)
     conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + db_str)
@@ -448,8 +612,8 @@ def CarryTable(db_str, LookBackWindow, TableList):
     fwd=df_list[Tbls[1]].loc[vol_start :]
     u=UtilityClass()
     
-    indx = spot.index
-    indx_fwd=fwd.index
+    indx = spot.index.tolist()
+    indx_fwd=fwd.index.tolist()
     
     temp2=[]
     for i in range(len(tenors)-1):    
@@ -457,7 +621,7 @@ def CarryTable(db_str, LookBackWindow, TableList):
     Index = [np.array(temp2), np.array(['Today', '1W Before', '1M Before']*(len(tenors)-1))]
     Headers=[np.array(["3mCarry"]*3+["Adj 3mCarry"]*3),np.array(['Level', 'Z', 'PCTL']*2)]
     prd = ['3m'] * (len(tenors)-1)
-    
+    dels=[]
     carry_list = []
     for each in indx:
         if each in indx_fwd:
@@ -468,7 +632,9 @@ def CarryTable(db_str, LookBackWindow, TableList):
             SC = SpotCurve(s_dict,f_dict)
             carry_list.append(SC.calc_carry(tenors[1:], prd))
         else:
-            indx.remove(each)
+            dels.append(each)
+    for each in dels:
+        indx.remove(each)
     df_carry = pd.DataFrame(carry_list, index=indx,columns=tenors[1 :]) 
     Values=[]
     for each in tenors[1 :]:
@@ -488,6 +654,7 @@ def CarryTable(db_str, LookBackWindow, TableList):
     tt=np.asarray(Values)
     rlt = pd.DataFrame(tt, index=Index, columns =Headers )
     cnxn.close()
+    print datetime.datetime.now()-tttt
     return rlt
 
 
@@ -499,6 +666,7 @@ def TRTable(db_str, LookBackWindow, TableList):
         db_str: database file directory
         LookBackWindow: Whether to select part of the table
     """
+    tttt=datetime.datetime.now()
     TableList=BLP2DF.removeUni(np.delete(TableList[0], 0))
     db_str= 'DBQ='+str(db_str)
     conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + db_str)
@@ -508,16 +676,16 @@ def TRTable(db_str, LookBackWindow, TableList):
     if str(LookBackWindow)!="ALL":
         df_list=Tables2DF(crsr,*Tbls,LB=str(LookBackWindow))
     else: df_list=Tables2DF(crsr,*Tbls)
+    
     tenors = list(df_list.values()[0])
     vol_dict=calc_historic_vol(tenors,Tbls, df_list)
-    
     vol_start=vol_dict[Tbls[0]].index[0]
     spot=df_list[Tbls[0]].loc[vol_start :]
     fwd=df_list[Tbls[1]].loc[vol_start :]
     u=UtilityClass()
     
-    indx = spot.index
-    indx_fwd=fwd.index
+    indx = spot.index.tolist()
+    indx_fwd=fwd.index.tolist()
     
     temp2=[]
     for i in range(len(tenors)-1):    
@@ -526,6 +694,7 @@ def TRTable(db_str, LookBackWindow, TableList):
     Headers=[np.array(["3mTR"]*3+["Adj 3mTR"]*3),np.array(['Level', 'Z', 'PCTL']*2)]
     prd = ['3m'] * (len(tenors)-1)
     
+    dels=[]
     TR_list = []
     for each in indx:
         if each in indx_fwd:
@@ -536,7 +705,9 @@ def TRTable(db_str, LookBackWindow, TableList):
             SC = SpotCurve(s_dict,f_dict)
             TR_list.append(SC.calc_total_return(tenors[1:], prd))
         else:
-            indx.remove(each)
+            dels.append(each)
+    for each in dels:
+        indx.remove(each)
     df_TR = pd.DataFrame(TR_list, index=indx,columns=tenors[1 :]) 
     Values=[]
     for each in tenors[1 :]:
@@ -556,6 +727,7 @@ def TRTable(db_str, LookBackWindow, TableList):
     tt=np.asarray(Values)
     rlt = pd.DataFrame(tt, index=Index, columns =Headers )
     cnxn.close()
+    print datetime.datetime.now()-tttt
     return rlt
     
 
@@ -580,6 +752,7 @@ def GenHnInDF(db_str,TableList, LookBackWindow):
 @xw.func
 @xw.arg('TableList', np.array, ndim=2)
 def YieldsLvLs(db_str,LookBackWindow,TableList):
+    tttt=datetime.datetime.now()
     [headers,df_list,tenors,cnxn,TableList]=GenHnInDF(db_str,TableList,LookBackWindow)
     temp2=[]
     for t in tenors:    
@@ -605,6 +778,7 @@ def YieldsLvLs(db_str,LookBackWindow,TableList):
     tt=np.asarray(Values)
     rlt = pd.DataFrame(tt, index=Index, columns =headers )
     cnxn.close()
+    print datetime.datetime.now()-tttt
     return rlt
 
 
@@ -617,6 +791,7 @@ if __name__ == "__main__":
     #s= calc_historic_vol(dbstr,LB)
     #CarryTable(dbstr, LB, s)
     SpreadsTable(dbstr,LB,ttt)
+    print datetime.datetime.now()-s
     
     #print TRTable(dbstr,LB)
 
