@@ -4,7 +4,7 @@ import numpy as np
 class YieldCurve:
     """Build Curve with given points and Calculate roll_down with given tenor and roll_down period"""
     acceptableKeyList = ['3m', '6m', '9m', '1y', '2y', '3y', '4y', '5y', '6y', '7y', '8y', '9y', '10y', '20y', '30y']
-    tenorDict = {'3m': 0.25, '6m': 0.5, '9m': 0.75, '1y': 1, '2y': 2, '3y': 3, '4y': 4, '5y': 5, '6y': 6, '7y': 7,
+    tenorDict = {'s':0,'3m': 0.25, '6m': 0.5, '9m': 0.75, '1y': 1, '2y': 2, '3y': 3, '4y': 4, '5y': 5, '6y': 6, '7y': 7,
                  '8y': 8, '9y': 9, '10y': 10, '20y': 20, '30y': 30}
 
     def __init__(self, **kwargs):
@@ -32,18 +32,18 @@ class YieldCurve:
         for key in self.yieldDict.keys():
             tenors.append(YieldCurve.tenorDict[key])
             yields.append(self.yieldDict[key])
-        #print(tenors)
-        #print(yields)
-        if isinstance(interpolate_tenor, int):
-            interpolate_tenor=[interpolate_tenor]
         try:
-            for each in interpolate_tenor:
-                if each<np.min(tenors):
+            if type(interpolate_tenor) is not list:
+                if interpolate_tenor<np.min(tenors):
                     raise ValueError
+            else:
+                for each in interpolate_tenor:
+                    if each<np.min(tenors):
+                        raise ValueError
             fit_curve = interpolate.interp1d(tenors, yields, kind='cubic')  # cubit spline interpolation
             #print(list(fit_curve(interpolate_tenor)))
-            if len(interpolate_tenor)==1:
-                return fit_curve(interpolate_tenor[0])
+            if type(interpolate_tenor) is not list:
+                return fit_curve(interpolate_tenor)
             else:
                 return list(fit_curve(interpolate_tenor))
 
@@ -53,7 +53,7 @@ class YieldCurve:
 
 
 
-    def calc_roll_down(self, tenor, roll_down):
+    def calc_roll_down(self, tenor, roll_down, *spot):
         """Calculate roll_down with given parameters
 
         Arguments:
@@ -62,13 +62,40 @@ class YieldCurve:
 
         Output: List of roll_down
         """
-        t = [YieldCurve.tenorDict[x]for x in tenor]
-        rd =[YieldCurve.tenorDict[x]for x in roll_down]
-        yields1 = self.build_curve(t)
-        zip_tenors = zip(t,rd)
-        yields2 = self.build_curve([x-y for x,y in zip_tenors])
-        zip_lists = zip(yields1, yields2)
-        return [x-y for x,y in zip_lists]
+        if spot==():        
+            if type(tenor) is list:
+                t = [YieldCurve.tenorDict[x]for x in tenor]
+                rd =[YieldCurve.tenorDict[x]for x in roll_down]
+                yields1 = self.build_curve(t)
+                zip_tenors = zip(t,rd)
+                yields2 = self.build_curve([x-y for x,y in zip_tenors])
+                zip_lists = zip(yields1, yields2)
+                return [x-y for x,y in zip_lists]
+            else:
+                t=YieldCurve.tenorDict[tenor]
+                rd=YieldCurve.tenorDict[roll_down]
+                yields1=self.build_curve(t)
+                yields2=self.build_curve(t-rd)
+                return yields1-yields2
+        else:
+            if type(tenor) is list:
+                t = [YieldCurve.tenorDict[x]for x in tenor]
+                rd =[YieldCurve.tenorDict[x]for x in roll_down]
+                s=YieldCurve(**spot[0])
+                yields1=s.build_curve(t)
+                yields2=self.build_curve(t)
+                n=[YieldCurve.tenorDict[spot[1]]/x for x in rd]
+                return [(x-y)/z for x,y,z in zip(yields2,yields1,n)]
+            else:
+                t=YieldCurve.tenorDict[tenor]
+                rd=YieldCurve.tenorDict[roll_down]
+                s=YieldCurve(**spot[0])
+                yields1=s.build_curve(t)
+                yields2=self.build_curve(t)
+                n=YieldCurve.tenorDict[spot[1]]/rd
+                return (yields2-yields1)/n
+            
+
     
     def calc_FRA(self,t1,t2,*DayCount,**kwargs):
         """Calculate FRA between t1 and t2

@@ -160,8 +160,8 @@ class UtilityClass:
                     lvl.append(np.percentile(series_list, perctl))      
         return lvl
         
-
 '''
+
 if __name__ == "__main__":
     today=datetime.date.today()
     dates=[]
@@ -180,5 +180,5 @@ if __name__ == "__main__":
     Result.append( u.calc_percentile(s,'1d','1w'))
     Result.append( u.calc_percentile_level(s,95))
     Result.append( u.calc_percentile_level(s,95,'1d','1w'))
-    
+    print Result
 '''
