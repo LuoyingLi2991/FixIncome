@@ -3,9 +3,10 @@ from collections import defaultdict
 from pandas import DataFrame
 from datetime import datetime, date
 import pandas as pd
-import testAccess
-import xlwings as xw
-import numpy as np
+from pandas._libs.tslib import Timestamp
+
+
+
  
  
 def bdh(ticker_list, fld_list, start_date, end_date=date.today().strftime('%Y%m%d'), periodselection='DAILY'):
@@ -104,6 +105,7 @@ def pd2DB (data,crsr):
         tbls_names.append(str(tbl.table_name))
     #write each df to database
     for key, df in data.items():
+        #print key
         key = ''.join(key.split()) # del all spaces in key
         # if table not created, create a new table
         if key not in tbls_names: 
@@ -130,7 +132,12 @@ def pd2DB (data,crsr):
             crsr.execute(query_last)  
             Last_Index = datetime.date(crsr.fetchone()[0])
             # Find first Index in dataframe
-            df_first_index=df.index.tolist()[0]
+            Fir=df.index.tolist()[0]
+           
+            if isinstance(Fir,date):
+                df_first_index=Fir
+            if isinstance(Fir,Timestamp):
+                df_first_index=datetime.date(Fir)
             if df_first_index <Last_Index: 
                 df=df.loc[Last_Index :]   # create a dataframe piece
                 if len(df.index)>1:
@@ -145,6 +152,7 @@ def pd2DB (data,crsr):
                             query_insert="INSERT INTO "+str(key)+" VALUES (%s);" % var_string
                             crsr.execute(query_insert,row)
             else: print "Extract Dates Range is not enough!"
+            
    
 
 def DF_Merge(value,heads,flds,start,end=date.today().strftime('%Y%m%d')):
@@ -154,7 +162,7 @@ def DF_Merge(value,heads,flds,start,end=date.today().strftime('%Y%m%d')):
     flds -- list of fields
     start --start date e.g "20070101"
     end --end date e.g "20070101"
-    heads -- desired col sequence in list format
+    heads -- desired col sequence in list format, match sequence with value
     Output
     Dictionary of DataFrame
     """    
@@ -184,6 +192,17 @@ def removeUni(l):
     return result
 
 
+
+
+
+
+
+
+
+
+
+
+'''
 @xw.func
 @xw.arg('spot', np.array, ndim=2)
 @xw.arg('fwd', np.array, ndim=2)
@@ -288,3 +307,4 @@ if __name__ == "__main__":
     except :
         print "Ctrl+C pressed. Stopping..."
         
+'''
