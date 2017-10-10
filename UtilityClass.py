@@ -9,6 +9,7 @@ class UtilityClass:
     
     @staticmethod
     def z_score(series_list,symmetric):
+        """Calculate z_score"""
         mu = np.mean(series_list)
         sigma = np.std(series_list)
         if symmetric:
@@ -33,20 +34,20 @@ class UtilityClass:
         Arguments:
         df -- a dataframe to be analysed
         symmetric -- a boolean variable indicating whether the series is symmetric
+        * choice -- args like '1d', '1w', '1m', Get Additional '1 day', '1 week' or '1 month' before z score
         
+        if no choices, return single point. Otherwise, return a list
         """
-        
-        
-        series_list=df[df.columns[0]].values
-        idx=df.index.tolist()
+        series_list=df[df.columns[0]].values # Get series values
+        idx=df.index.tolist()  
         idx_now=idx[-1]
-        zscore=UtilityClass.z_score(series_list,symmetric)
+        zscore=UtilityClass.z_score(series_list,symmetric) # Compute last day's z score
         lvl=series_list[-1]
-        if choice != ():
+        if choice != (): # Compute given choices' zscore
             zscore=[zscore]
             lvl=[lvl]
             for each in choice:
-                if each=='1d':
+                if each=='1d':  # Find date one day before 
                     while True:
                         lastD=idx_now-datetime.timedelta(days=1)
                         if lastD in idx:
@@ -56,7 +57,7 @@ class UtilityClass:
                     #print series_list
                     lvl.append(series_list[-1])
                     zscore.append(UtilityClass.z_score(series_list,symmetric))
-                if each=='1w':
+                if each=='1w':  # Find date one week before
                     lastW=idx_now-datetime.timedelta(weeks=1)
                     while lastW not in idx:
                         lastW=lastW-datetime.timedelta(days=1)
@@ -64,7 +65,7 @@ class UtilityClass:
                     series_list=df1[df1.columns[0]].values
                     lvl.append(series_list[-1])
                     zscore.append(UtilityClass.z_score(series_list,symmetric))
-                if each=='1m':
+                if each=='1m':  # Find date one month before
                     lastM=idx_now-datetime.timedelta(days=30)
                     while lastM not in idx:
                         lastM=lastM-datetime.timedelta(days=1)
@@ -79,9 +80,11 @@ class UtilityClass:
     @staticmethod
     def calc_percentile(df, *choice):
         """return the percentile of the last point in the list
-
         Argument:
-        series_list -- list of returns to be analysed
+        df -- a dataframe to be analysed
+        * choice -- args like '1d', '1w', '1m', Get Additional '1 day', '1 week' or '1 month' before z score
+        
+        if no choices, return single point. Otherwise, return a list
         """
         pctl=[]
         series_list=df[df.columns[0]].values
@@ -89,9 +92,9 @@ class UtilityClass:
         idx=df.index.tolist()
         idx_now=idx[-1]
         #print series_list[-1]
-        pctl=stats.percentileofscore(series_list,series_list[-1],kind='weak')/100
+        pctl=stats.percentileofscore(series_list,series_list[-1],kind='weak')/100  #Compute last data's percentile 
         
-        if choice != ():
+        if choice != (): # Compute given choices's percentile
             pctl=[pctl]
             for each in choice:
                 if each=='1d':
@@ -122,10 +125,12 @@ class UtilityClass:
     @staticmethod
     def calc_percentile_level(df, perctl, *choice):
         """return the percentile level of a given list
-
         Argument:
-        series_list -- list of returns to be analysed
+        df -- a dataframe to be analysed
+        * choice -- args like '1d', '1w', '1m', Get Additional '1 day', '1 week' or '1 month' before z score
         perctl -- target percentile e.g 25 means the method returns a value of 25% percentile of the list
+        
+        if no choices, return single point. Otherwise, return a list
         """
      
         series_list=df.values.tolist()

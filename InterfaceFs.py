@@ -15,7 +15,8 @@ import win32com.client
 @xw.ret(expand='table')
 def FwdPlot(Country,path):
     """ Return "1y/1y-1y" DataFrame of Country
-    db_str: database directory
+    Country: Desired Country
+    path: Path of the folder where database locates at
     """
     print path
     fwd=str(Country)+"Fwd1y"  # Construct 1 year forward table name
@@ -206,40 +207,51 @@ def Repair_Compact_DB(path):
     oApp = None
 
 
-def GetTbls(TableList,LookBackWindow,tblsuffix,path):
+def GetTbls(TableList,LookBackWindow,TblSuffix,path):
+    """Return Tables extracted from Database
+    TableList: List of Tables YieldsTables
+    TblSuffix: Suffix Added to the tables later
+    path: Path of the folder where database locates at
+    """
     TableList=removeUni(np.delete(TableList[0], 0))
-    tbls=[]
+    tbls=[]  # Construct tablenames 
     for each in TableList:
-        tbls.append(each+tblsuffix)
+        tbls.append(each+TblSuffix)
     
+    # Connect to Database
     tempDB= 'DBQ='+str(path+'\\TempData.accdb')   
     conn = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + tempDB)  #Create database connection string
     [crsr,cnxn]=Build_Access_Connect(conn)
-    
-    
     crsrs=[(crsr,cnxn)]
     
+    # Get tables from Databse
     if str(LookBackWindow)!="ALL":
         df_dict=Tables2DF(crsrs,*tbls,LB=str(LookBackWindow))
     else: df_dict=Tables2DF(crsrs,*tbls)
     
-    headers=list(df_dict.values()[0])
+    headers=list(df_dict.values()[0])  # Get column names
     
-    temp1=[]
+    temp1=[]  # Construct result dataframe's column names
     for tbl in TableList:
         temp1=temp1+[tbl]*3
-        
-    temp2=[]
+    rlt_cols = [np.array(temp1), np.array(['Level', 'Z', 'PCTL']*len(TableList))]    
+    
+    temp2=[]  # Construct result dataframe's index
     for header in headers:
         temp2=temp2+[header]*3
-        
-    rlt_cols = [np.array(temp1), np.array(['Level', 'Z', 'PCTL']*len(TableList))]
     rlt_index = [np.array(temp2), np.array(['Today', '1W Before', '1M Before']*len(headers))]
 
     return df_dict, rlt_cols, rlt_index, headers, tbls
 
 
 def GetRltDF(tbls,df_dict,headers,rlt_cols,rlt_index,*ylds):
+    """Templete Function that constructs tables for Excel GUI
+    tbls: list of table names with desired orders
+    df_dict: dictionary contains all tables extracted from database
+    headers: Column names of database table
+    rlt_cols/rlt_index: column names/index for returned dataframe
+    *ylds: an args to indicate if df_dict are yields
+    """
     Values=[] 
     u=UtilityClass() 
     
@@ -248,11 +260,11 @@ def GetRltDF(tbls,df_dict,headers,rlt_cols,rlt_index,*ylds):
         lvl=[]
         z=[]
         p=[]
-        for each in headers: # for each column in spread dataframe, compute zscore and percentile
+        for each in headers: # for each column in dataframe, compute zscore and percentile
             ss=df[each].to_frame()
             [s_lvl,s_zscore]=u.calc_z_score(ss,False,'1w','1m')
             s_ptl=u.calc_percentile(ss,'1w','1m')
-            if ylds==():
+            if ylds==(): # Convert to basis points if not yields
                 temp=[x*100 for x in s_lvl]
                 s_lvl=temp
             lvl=lvl+s_lvl
@@ -273,7 +285,7 @@ def GetRltDF(tbls,df_dict,headers,rlt_cols,rlt_index,*ylds):
 def SpreadsTable(LookBackWindow,TableList,path):
     """Return Today, 1week before and 1month before's Spreads Level, Z_score, Percentile
     Arguments:
-        db_str: database file directory
+        path: database file directory
         LookBackWindow: Whether to select part of the table
         TableList: a list of tables needed
     Output: Today, 1week and 1month's spreads level,zscore(asymmetric) and percentile    
@@ -293,7 +305,7 @@ def SpreadsTable(LookBackWindow,TableList,path):
 def SpreadsRDTable(LookBackWindow,TableList,path):
     """For Spot Curves, return Spread Total Return
     For Forward Curves, return Spread Roll Down
-    db_str: database file directory
+    path: database file directory
     LookBackWindow: Whether to select part of the table
     TableList: a list of tables needed"""
     
@@ -310,7 +322,7 @@ def SpreadsRDTable(LookBackWindow,TableList,path):
 def SpreadsAdjRD(LookBackWindow,TableList,path):
     """For Spot Curves, return Spread Total Return
     For Forward Curves, return Spread Roll Down
-    db_str: database file directory
+    path: database file directory
     LookBackWindow: Whether to select part of the table
     TableList: a list of tables needed"""
     
@@ -328,7 +340,7 @@ def SpreadsAdjRD(LookBackWindow,TableList,path):
 def ButterFlysTable(LookBackWindow,TableList,path):
     """Return Today, 1week before and 1month before's Flys Level, Z_score, Percentile
     Arguments:
-        db_str: database file directory
+        path: database file directory
         LookBackWindow: Whether to select part of the table
         TableList: a list of tables needed
     """
@@ -345,7 +357,7 @@ def ButterFlysTable(LookBackWindow,TableList,path):
 def FlysRDTable(LookBackWindow,TableList,path):
     """For Spot Curves, return Spread Total Return
     For Forward Curves, return Spread Roll Down
-    db_str: database file directory
+    path: database file directory
     LookBackWindow: Whether to select part of the table
     TableList: a list of tables needed"""
     
@@ -362,7 +374,7 @@ def FlysRDTable(LookBackWindow,TableList,path):
 def FlysAdjRD(LookBackWindow,TableList,path):
     """For Spot Curves, return Spread Total Return
     For Forward Curves, return Spread Roll Down
-    db_str: database file directory
+    path: database file directory
     LookBackWindow: Whether to select part of the table
     TableList: a list of tables needed"""
     
@@ -379,7 +391,7 @@ def FlysAdjRD(LookBackWindow,TableList,path):
 def AdjRollDownTable(LookBackWindow,TableList,path):
     """Return Today, 1week before and 1month before's Adj_RollDown, Z_score, Percentile
     Arguments:
-        db_str: database file directory
+        path: database file directory
         LookBackWindow: Whether to select part of the table
     """
     tttt=datetime.datetime.now()
@@ -426,7 +438,7 @@ def AdjRollDownTable(LookBackWindow,TableList,path):
 def RollDownTable(LookBackWindow,TableList,path):
     """Return Today, 1week before and 1month before's Total Return Level, Z_score, Percentile
     Arguments:
-        db_str: database file directory
+        path: database file directory
         LookBackWindow: Whether to select part of the table
     """
     tttt=datetime.datetime.now()
@@ -468,13 +480,13 @@ def RollDownTable(LookBackWindow,TableList,path):
 @xw.func
 @xw.arg('TableList', np.array, ndim=2)
 def YieldsLvLs(LookBackWindow,TableList,path):
+    """Return YieldsLevels,zscore,percentiles"""
     #Repair_Compact_DB(path)
     TableList=removeUni(np.delete(TableList[0], 0))
-   
+    #connect to databse
     YldsDB= 'DBQ='+str(path+'\\YieldsData.accdb')
     conn = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + YldsDB)  #Create database connection string
-    [crsr,cnxn]=Build_Access_Connect(conn)
-        
+    [crsr,cnxn]=Build_Access_Connect(conn)    
     crsrs=[(crsr,cnxn)]
     
     if str(LookBackWindow)!="ALL":

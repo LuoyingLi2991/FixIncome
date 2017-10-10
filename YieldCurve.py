@@ -20,10 +20,8 @@ class YieldCurve:
 
     def build_curve(self, interpolate_tenor):
         """Build a cubic spline curve with given yields
-
         Argument:
         interpolate_tenor -- list of points in form of double number e.g [3.74,3.75] or a single tenor point   e.g 3.5
-
         Output: List of yields with respect to the given tenors or a single yield if there is only one tenor
         """
 
@@ -57,13 +55,13 @@ class YieldCurve:
         """Calculate roll_down with given parameters
 
         Arguments:
-        tenor -- list of tenors compatible with acceptableKeyList eg. ['1y','3y']
-        roll_down -- list of roll_down periods compatible with acceptableKeyList eg. ['3m','3m']
-
-        Output: List of roll_down
+        tenor -- list of tenors compatible with acceptableKeyList eg. ['1y','3y'] or single tenor eg. '6m'
+        roll_down -- list of roll_down periods compatible with acceptableKeyList eg. ['3m','3m'] or single tenor eg.'3m'
+        *spot -- args contains spot yields and forward tenors
+        Output: List of roll_down or a single roll down 
         """
-        if spot==():        
-            if type(tenor) is list:
+        if spot==():  # Roll Down for Spot Curves 
+            if type(tenor) is list: # For Multiple points
                 t = [YieldCurve.tenorDict[x]for x in tenor]
                 rd =[YieldCurve.tenorDict[x]for x in roll_down]
                 yields1 = self.build_curve(t)
@@ -71,22 +69,22 @@ class YieldCurve:
                 yields2 = self.build_curve([x-y for x,y in zip_tenors])
                 zip_lists = zip(yields1, yields2)
                 return [x-y for x,y in zip_lists]
-            else:
+            else: # For single point
                 t=YieldCurve.tenorDict[tenor]
                 rd=YieldCurve.tenorDict[roll_down]
                 yields1=self.build_curve(t)
                 yields2=self.build_curve(t-rd)
                 return yields1-yields2
-        else:
-            if type(tenor) is list:
+        else:  # Roll Down for Forward Curves 
+            if type(tenor) is list: # For Multiple points
                 t = [YieldCurve.tenorDict[x]for x in tenor]
                 rd =[YieldCurve.tenorDict[x]for x in roll_down]
                 s=YieldCurve(**spot[0])
                 yields1=s.build_curve(t)
                 yields2=self.build_curve(t)
-                n=[YieldCurve.tenorDict[spot[1]]/x for x in rd]
+                n=[YieldCurve.tenorDict[spot[1]]/x for x in rd] # Approx Rolling Down
                 return [(x-y)/z for x,y,z in zip(yields2,yields1,n)]
-            else:
+            else:  # For Single Points
                 t=YieldCurve.tenorDict[tenor]
                 rd=YieldCurve.tenorDict[roll_down]
                 s=YieldCurve(**spot[0])
