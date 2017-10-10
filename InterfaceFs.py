@@ -6,35 +6,10 @@ import pyodbc
 from dateutil.relativedelta import relativedelta
 from YieldCurve import YieldCurve
 from UtilityClass import UtilityClass
-import BLP2DF
 import datetime
 import os
-import ComputeZone
 import win32com.client
 
-
-@xw.func
-@xw.arg('Tickers', pd.DataFrame, index=True, header=True)
-@xw.arg('start', np.array, ndim=2)
-def updateDB(Tickers,start):
-    headers=Tickers.index
-    table_names=BLP2DF.removeUni(list(Tickers))
-    tickers_list=Tickers.T.values.tolist()
-    for i,each in enumerate(tickers_list):
-        tickers_list[i]=BLP2DF.removeUni(each)
-    flds=["PX_LAST"]
-    #start=str(int(start[0][0]))
-    start=(datetime.date.today()-datetime.timedelta(days=60)).strftime('%Y%m%d')
-    print start
-    data={}
-    for name, tickers in zip(table_names,tickers_list):
-        data[name]=BLP2DF.DF_Merge(tickers,headers,flds,start)
-    conn_str = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; '
-                'DBQ=C:\\users\\luoying.li\\.spyder\\Modules\\YieldsData.accdb;')
-    [crsr,cnxn]=Build_Access_Connect(conn_str)
-    BLP2DF.pd2DB(data, crsr)
-    cnxn.commit() 
-    cnxn.close()
 
 @xw.func
 @xw.ret(expand='table')
@@ -42,13 +17,14 @@ def FwdPlot(Country,path):
     """ Return "1y/1y-1y" DataFrame of Country
     db_str: database directory
     """
-
+    print path
     fwd=str(Country)+"Fwd1y"  # Construct 1 year forward table name
     spot=str(Country)+"Spot"  # Construct spot table name
-    YldsDB= 'DBQ='+str(path+'\\YieldsData.accdb')
-    conn = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + YldsDB)
-    [crsr,cnxn]=Build_Access_Connect(conn)  # Connect to MS Access
-    df=Tables2DF(crsr,spot,fwd)  # return dictionary of tables from database
+    YldsDB1= 'DBQ='+str(path+ '\\YieldsData.accdb')
+    conn1 = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + YldsDB1)
+    [crsr1,cnxn1]=Build_Access_Connect(conn1)  # Connect to MS Access
+    crsrs=[(crsr1,cnxn1)]
+    df=Tables2DF(crsrs,spot,fwd)  # return dictionary of tables from database
     fwd=df[fwd]  # get forward table from dictionary
     spot=df[spot]  # get spot table from dictionary
     tenors=list(spot)  # get tenor headers from spot table
@@ -107,7 +83,15 @@ def Build_Access_Connect(conn_str):
     crsr = cnxn.cursor()
     return crsr,cnxn
 
-def Tables2DF(crsr,*selected_table_name,**LookBackWindow):
+def removeUni(l):
+    """convert unicode to string"""
+    result=[]
+    for each in l:
+        each=each.replace(u'\xa0', ' ').encode('utf-8')
+        result.append(each)
+    return result
+
+def Tables2DF(crsrs,*selected_table_name,**LookBackWindow):
     """Reformat Tables in DataBase to Pandas DataFrame and Stored in a dictionary with table_names as keys
     Argument:
     crsr                  ---cursor from access
@@ -119,13 +103,17 @@ def Tables2DF(crsr,*selected_table_name,**LookBackWindow):
     """
     dict_Para={'1y':1,'2y':2,'3y':3,'4y':4,'5y':5,'10y':10} # used to convert LookBackWindow to number format
     db_schema = dict() # used to save table names and table column names of all tables in database
+    
+    crsr=crsrs[0][0]
+    cnxn=crsrs[0][1]
+    
     tbls = crsr.tables(tableType='TABLE').fetchall()  
     for tbl in tbls:
         if tbl.table_name not in db_schema.keys(): 
             db_schema[tbl.table_name] = list()
         for col in crsr.columns(table=tbl.table_name):
             db_schema[tbl.table_name].append(col[3])
-                
+              
     if selected_table_name==() and LookBackWindow=={}: # Return all tables 
         df_dict=dict()
         for tbl, cols in db_schema.items():
@@ -140,6 +128,7 @@ def Tables2DF(crsr,*selected_table_name,**LookBackWindow):
             temp_df = pd.DataFrame(val_list, columns=cols) #Convert to dataframe format
             temp_df.set_index(keys=cols[0], inplace=True) # First Column as Key
             df_dict[tbl]=temp_df.sort_index() # Save each dataframe in dictionary
+        cnxn.close() 
         return df_dict
             
     elif selected_table_name==() and LookBackWindow!={}: # Return part of each table in database
@@ -163,6 +152,7 @@ def Tables2DF(crsr,*selected_table_name,**LookBackWindow):
             temp_df = pd.DataFrame(val_list, columns=header)
             temp_df.set_index(keys=header[0], inplace=True) # First Column [Date] as Key
             df_dict[each]=temp_df.sort_index() # return dictionary of dataframes
+        cnxn.close()
         return df_dict
         
     elif selected_table_name!=() and LookBackWindow=={}:  # Return full range of selected tables
@@ -179,6 +169,7 @@ def Tables2DF(crsr,*selected_table_name,**LookBackWindow):
              temp_df = pd.DataFrame(val_list, columns=db_schema[each]) # Create a dataframe
              temp_df.set_index(keys=db_schema[each][0], inplace=True) # First Column as Key
              df_dict[each]=temp_df.sort_index()
+         cnxn.close()
          return df_dict
     else:  # Return part of the selected tables
          LB=LookBackWindow.values()[0]
@@ -200,87 +191,9 @@ def Tables2DF(crsr,*selected_table_name,**LookBackWindow):
              temp_df = pd.DataFrame(val_list, columns=header)
              temp_df.set_index(keys=header[0], inplace=True) # First Column [Date] as Key
              df_dict[each]=temp_df.sort_index() # return dictionary of dataframes
+         cnxn.close() 
          return df_dict
 
-
-@xw.func
-def UpdateElements(Country,path):
-    tempDB= 'DBQ='+str(path + '\\TempData.accdb')  
-    conn1 = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + tempDB)  #Create database connection string
-    [crsr1,cnxn1]=Build_Access_Connect(conn1)
-    tbls1 = crsr1.tables(tableType='TABLE').fetchall()
-    
-    cntyExist=False
-    t=Country+"SpotSpreadsAdjRD"
-    for tbl in tbls1:
-        if tbl[2]==t:
-            cntyExist=True
-            
-    yieldsDB= 'DBQ='+str(path+'\\YieldsData.accdb')   
-    conn2 = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + yieldsDB)  #Create database connection string
-    [crsr2,cnxn2]=Build_Access_Connect(conn2)
-    tbls2=crsr2.tables(tableType='TABLE').fetchall()
-    
-
-    cnty_tbls=[]
-    for tbl in tbls2:
-        if tbl[2].startswith(Country):
-            cnty_tbls.append(tbl[2])
-    cnty_tbls=BLP2DF.removeUni(cnty_tbls)
-
-    
-    if not cntyExist:
-        df_dict=Tables2DF(crsr2,*cnty_tbls)
-    else:
-        df_dict=Tables2DF(crsr2,*cnty_tbls,LB='2m')
- 
-    spread_dict=ComputeZone.Spreads(df_dict)
-    BLP2DF.pd2DB(spread_dict,crsr1)
-    cnxn1.commit()
-    fly_dict=ComputeZone.Flys(df_dict)
-    BLP2DF.pd2DB(fly_dict,crsr1)
-    cnxn1.commit()
-    RD_dict=ComputeZone.RollDown(df_dict)
-    BLP2DF.pd2DB(RD_dict,crsr1)
-    cnxn1.commit()
-    C_dict=ComputeZone.Carry(df_dict)
-    BLP2DF.pd2DB(C_dict,crsr1)
-    cnxn1.commit()
-    TR_dict=ComputeZone.TotalReturn(df_dict)
-    BLP2DF.pd2DB(TR_dict,crsr1)
-    cnxn1.commit()
-
-    [spreadvol,flyvol]=ComputeZone.SpreadsFlysVol(df_dict,crsr1)
-    BLP2DF.pd2DB(spreadvol,crsr1)
-    cnxn1.commit()
-    BLP2DF.pd2DB(flyvol,crsr1)
-    cnxn1.commit()
-    yldsvol=ComputeZone.YieldsVol(df_dict,crsr2)
-    BLP2DF.pd2DB(yldsvol,crsr1)
-    cnxn1.commit()
-    adjRD=ComputeZone.AdjRD(df_dict,crsr1)
-    BLP2DF.pd2DB(adjRD,crsr1)
-    cnxn1.commit()
-    rlt=ComputeZone.AdjCarryTR(df_dict,crsr1)
-    BLP2DF.pd2DB(rlt,crsr1)
-    cnxn1.commit()
-    [spreadRD,flysRD]=ComputeZone.SpreadsFlysTR(df_dict)
-    BLP2DF.pd2DB(spreadRD,crsr1)
-    cnxn1.commit()
-    BLP2DF.pd2DB(flysRD,crsr1)
-    cnxn1.commit()
-    
-    AdjSpreadsRD=ComputeZone.AdjSpreadsTR(df_dict,crsr1)
-    AdjFlysRD=ComputeZone.AdjFlysTR(df_dict,crsr1)
-    BLP2DF.pd2DB(AdjSpreadsRD,crsr1)
-    cnxn1.commit()
-    BLP2DF.pd2DB(AdjFlysRD,crsr1)    
-
-    
-    cnxn1.commit()
-
-    cnxn1.close()
-    cnxn2.close()
 
 @xw.func
 def Repair_Compact_DB(path):
@@ -294,7 +207,7 @@ def Repair_Compact_DB(path):
 
 
 def GetTbls(TableList,LookBackWindow,tblsuffix,path):
-    TableList=BLP2DF.removeUni(np.delete(TableList[0], 0))
+    TableList=removeUni(np.delete(TableList[0], 0))
     tbls=[]
     for each in TableList:
         tbls.append(each+tblsuffix)
@@ -303,11 +216,13 @@ def GetTbls(TableList,LookBackWindow,tblsuffix,path):
     conn = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + tempDB)  #Create database connection string
     [crsr,cnxn]=Build_Access_Connect(conn)
     
-    if str(LookBackWindow)!="ALL":
-        df_dict=Tables2DF(crsr,*tbls,LB=str(LookBackWindow))
-    else: df_dict=Tables2DF(crsr,*tbls)
     
-    cnxn.close()
+    crsrs=[(crsr,cnxn)]
+    
+    if str(LookBackWindow)!="ALL":
+        df_dict=Tables2DF(crsrs,*tbls,LB=str(LookBackWindow))
+    else: df_dict=Tables2DF(crsrs,*tbls)
+    
     headers=list(df_dict.values()[0])
     
     temp1=[]
@@ -468,7 +383,7 @@ def AdjRollDownTable(LookBackWindow,TableList,path):
         LookBackWindow: Whether to select part of the table
     """
     tttt=datetime.datetime.now()
-    TableList=BLP2DF.removeUni(np.delete(TableList[0], 0))
+    TableList=removeUni(np.delete(TableList[0], 0))
     tbls=[]
     for each in TableList:
         if each.endswith('Spot'):
@@ -479,11 +394,13 @@ def AdjRollDownTable(LookBackWindow,TableList,path):
     conn = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + tempDB)  #Create database connection string
     [crsr,cnxn]=Build_Access_Connect(conn)
     
-    if str(LookBackWindow)!="ALL":
-        df_dict=Tables2DF(crsr,*tbls,LB=str(LookBackWindow))
-    else: df_dict=Tables2DF(crsr,*tbls)
     
-    cnxn.close()
+    crsrs=[(crsr,cnxn)]
+    
+    if str(LookBackWindow)!="ALL":
+        df_dict=Tables2DF(crsrs,*tbls,LB=str(LookBackWindow))
+    else: df_dict=Tables2DF(crsrs,*tbls)
+   
     tenors=list(df_dict.values()[0])
     
     temp1=[]
@@ -513,7 +430,7 @@ def RollDownTable(LookBackWindow,TableList,path):
         LookBackWindow: Whether to select part of the table
     """
     tttt=datetime.datetime.now()
-    TableList=BLP2DF.removeUni(np.delete(TableList[0], 0))
+    TableList=removeUni(np.delete(TableList[0], 0))
     tbls=[]
     for each in TableList:
         if each.endswith('Spot'):
@@ -524,11 +441,12 @@ def RollDownTable(LookBackWindow,TableList,path):
     conn = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + tempDB)  #Create database connection string
     [crsr,cnxn]=Build_Access_Connect(conn)
     
-    if str(LookBackWindow)!="ALL":
-        df_dict=Tables2DF(crsr,*tbls,LB=str(LookBackWindow))
-    else: df_dict=Tables2DF(crsr,*tbls)
+    crsrs=[(crsr,cnxn)]
     
-    cnxn.close()
+    if str(LookBackWindow)!="ALL":
+        df_dict=Tables2DF(crsrs,*tbls,LB=str(LookBackWindow))
+    else: df_dict=Tables2DF(crsrs,*tbls)
+    
     tenors=list(df_dict.values()[0])
     
     temp1=[]
@@ -551,17 +469,18 @@ def RollDownTable(LookBackWindow,TableList,path):
 @xw.arg('TableList', np.array, ndim=2)
 def YieldsLvLs(LookBackWindow,TableList,path):
     #Repair_Compact_DB(path)
-    TableList=BLP2DF.removeUni(np.delete(TableList[0], 0))
+    TableList=removeUni(np.delete(TableList[0], 0))
    
     YldsDB= 'DBQ='+str(path+'\\YieldsData.accdb')
     conn = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + YldsDB)  #Create database connection string
     [crsr,cnxn]=Build_Access_Connect(conn)
+        
+    crsrs=[(crsr,cnxn)]
     
     if str(LookBackWindow)!="ALL":
-        df_dict=Tables2DF(crsr,*TableList,LB=str(LookBackWindow))
-    else: df_dict=Tables2DF(crsr,*TableList)
+        df_dict=Tables2DF(crsrs,*TableList,LB=str(LookBackWindow))
+    else: df_dict=Tables2DF(crsrs,*TableList)
     
-    cnxn.close()
     headers=list(df_dict.values()[0])
     
     temp1=[]
@@ -581,18 +500,10 @@ def YieldsLvLs(LookBackWindow,TableList,path):
 
 
 if __name__ == "__main__":
-    
     LB='ALL'
     #c=['KRW','SG','MY','TW','US','IN','AU','CN']
     path='C:\\users\\luoying.li\\.spyder\\Modules'
-    '''
-    for each in c:
-        print each
-        Repair_Compact_DB(path)
-        UpdateElements(each,path)
-    
-    
-    '''    
+
     c='KRW'
     h=['Spot','Fwd3m','Fwd6m','Fwd1y','Fwd2y','Fwd3y','Fwd4y','Fwd5y']
     tt=[]
@@ -601,19 +512,38 @@ if __name__ == "__main__":
     tt.insert(0,'')
     ttt=[tt]
     
-    '''
+
+
     print YieldsLvLs(LB,ttt,path)
     print SpreadsTable(LB,ttt,path)
-    print SpreadsRDTable(LB,ttt,path)
+    print SpreadsRDTable(LB,ttt,path) 
     print SpreadsAdjRD(LB,ttt,path)
     print FlysAdjRD(LB,ttt,path)
     print ButterFlysTable(LB,ttt,path)
     print FlysRDTable(LB,ttt,path)
+    
     '''
     a=SpreadsRDTable(LB,ttt,path)
     b=SpreadsAdjRD(LB,ttt,path)
 
-    
-    
-
-    
+    db_schema={}
+    YldsDB= 'DBQ='+str('C:\\Users\\luoying.li\\.spyder\\Modules\\TempData_be.accdb')
+    conn = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + YldsDB)
+    [crsr3,cnxn3]=Build_Access_Connect(conn) 
+    YldsDB1= 'DBQ='+str('C:\\Users\\luoying.li\\.spyder\\Modules\\TempData.accdb')
+    conn1= ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + YldsDB1)
+    [crsr,cnxn]=Build_Access_Connect(conn1) 
+    tbls = crsr3.tables(tableType='TABLE').fetchall()  
+    for tbl in tbls:
+        if tbl.table_name not in db_schema.keys(): 
+            db_schema[tbl.table_name] = list()
+        for col in crsr3.columns(table=tbl.table_name):
+            db_schema[tbl.table_name].append(col[3])
+           
+    tblss=db_schema.keys()
+    sql = "SELECT * from %s" % tblss[0]  
+    crsr.execute(sql)
+    print crsr.fetchone()
+    cnxn.close()
+    cnxn3.close()
+    '''
