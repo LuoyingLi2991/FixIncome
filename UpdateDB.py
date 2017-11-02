@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 Created on Mon Oct 09 10:16:33 2017
-
 @author: luoying.li
 """
 
@@ -76,7 +75,7 @@ def UpdateElements(Country,path):
     
     # Check if Temp data tables exist for this Country
     cntyExist=False
-    t=Country+"SpotSpreadsAdjRD"  
+    t=Country+"SpotFlysAdjRD"  
     for tbl in tbls1:
         if tbl[2]==t:
             cntyExist=True
@@ -160,4 +159,3 @@ def UpdateElements(Country,path):
 
     cnxn1.close()
     cnxn2.close()
-

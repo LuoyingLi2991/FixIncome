@@ -141,23 +141,39 @@ def pd2DB (data,crsr):
             # Find first Index in dataframe
             Fir=df.index.tolist()[0]
            
-            if isinstance(Fir,date): # When df is from bloomberg, no need to change datatype
+            if isinstance(Fir,date):
                 df_first_index=Fir
-            if isinstance(Fir,Timestamp): # When df is from database, convert timestamp to datetime.date
+            if isinstance(Fir,Timestamp):
                 df_first_index=datetime.date(Fir)
+            
             if df_first_index <Last_Index: 
+                DBTbl=Tables2DF(crsr,key,LB='2m').values()[0].tail(5)
+                DBIdx=DBTbl.index.tolist()
+                DBIdx.sort()
+                Tempdf=df.loc[DBIdx]
+                nIdx=[]
+                for i, dt in enumerate(DBIdx):
+                    dic1=DBTbl.loc[dt].to_dict()
+                    dic2=Tempdf.loc[dt].to_dict()
+                    if cmp(dic1,dic2)!=0:
+                        Last_Index=datetime.date(dt)
+                        nIdx=nIdx+DBIdx[i :]
+                        break
+                
+                if len(nIdx)==0:
+                    nIdx.append(DBIdx[-1])
+                    Last_Index=datetime.date(DBIdx[-1])
+                for each in nIdx:
+                    crsr.execute("delete from "+str(key)+" where [Date]=?",each)
+
                 df=df.loc[Last_Index :]   # create a dataframe piece
-                if len(df.index)>1:
-                    count=0
-                    for index, row in df.iterrows():
-                        if count==0:  # skip the first row
-                            count=1
-                        else:  # write to the database starting from the second row of df piece
-                            row=list(row)
-                            row.insert(0,index)
-                            var_string = ', '.join('?' * len(row))
-                            query_insert="INSERT INTO "+str(key)+" VALUES (%s);" % var_string
-                            crsr.execute(query_insert,row)
+                for index, row in df.iterrows():
+                    # write to the database starting from the second row of df piece
+                    row=list(row)
+                    row.insert(0,index)
+                    var_string = ', '.join('?' * len(row))
+                    query_insert="INSERT INTO "+str(key)+" VALUES (%s);" % var_string
+                    crsr.execute(query_insert,row)
             else: print "Extract Dates Range is not enough!"
             
    
@@ -173,11 +189,13 @@ def DF_Merge(value,heads,flds,start,end=date.today().strftime('%Y%m%d')):
     Output
     Dictionary of DataFrame
     """    
-    data=bdh(value,flds,start,end) # Get a dictionary of df from bloomberg
+    #print key,value,heads,flds,start,end
+    data=bdh(value,flds,start,end)
     count=0 
     headers=dict(zip(value,heads))
-    for key, each in data.items(): # Merge all df together
+    for key, each in data.items():
         each.rename(columns={flds[0]:headers[key]},inplace=True)
+        #print each.head()
         if count==0:
             result=each
             count=count+1
@@ -221,14 +239,20 @@ def Tables2DF(crsr,*selected_table_name,**LookBackWindow):
     """
     dict_Para={'1y':1,'2y':2,'3y':3,'4y':4,'5y':5,'10y':10} # used to convert LookBackWindow to number format
     db_schema = dict() # used to save table names and table column names of all tables in database
-    
-    tbls = crsr.tables(tableType='TABLE').fetchall()  
-
-    for tbl in tbls:
-        if tbl.table_name not in db_schema.keys(): 
-            db_schema[tbl.table_name] = list()
-        for col in crsr.columns(table=tbl.table_name):
-            db_schema[tbl.table_name].append(col[3])
+     
+    if selected_table_name==():
+        tbls = crsr.tables(tableType='TABLE').fetchall() 
+        for tbl in tbls:
+            if tbl.table_name not in db_schema.keys(): 
+                db_schema[tbl.table_name] = list()
+            for col in crsr.columns(table=tbl.table_name):
+                db_schema[tbl.table_name].append(col[3])
+    else:
+        for tbl in selected_table_name:
+            if tbl not in db_schema.keys(): 
+                db_schema[tbl] = list()
+            for col in crsr.columns(table=tbl):
+                db_schema[tbl].append(col[3])
             
     if selected_table_name==() and LookBackWindow=={}: # Return all tables 
         df_dict=dict()
@@ -308,9 +332,6 @@ def Tables2DF(crsr,*selected_table_name,**LookBackWindow):
 
 
 def Spreads(df_dict):
-    """Compute Spreads for each date in each given dataframe
-    df_dict: a dictionary of dataframes extracted from YieldsData database
-    """
     Convert_dict={'2s5s':[2,5],'5s10s':[5,10],'2s10s':[2,10],'1s2s':[1,2],'2s3s':[2,3],'1s3s':[1,3],'3s5s':[3,5],'5s7s':[5,7]}
     spreads=['2s5s','5s10s','2s10s','1s2s','2s3s','1s3s','3s5s','5s7s']  # desired spreads
     
@@ -328,53 +349,47 @@ def Spreads(df_dict):
             yc = YieldCurve(**kwarg)
             ylds=yc.build_curve(tenors)
             s.append([x-y for x,y in zip(ylds[1::2],ylds[0::2])])
-        key=tbl+"Spreads" # Construct desired table names
+        key=tbl+"Spreads"
         df=pd.DataFrame(s, index=indx,columns=spreads)
-        df.index.name='Date'  # Setup index name
-        rlt[key]=df 
-    return rlt  # return a dictionary of spreads dataframe
+        df.index.name='Date'
+        rlt[key]=df
+    return rlt
 
 def Flys(df_dict):
-    """Compute Flys for each date in each given dataframe
-    df_dict: a dictionary of dataframes extracted from YieldsData database
-    """
     Convert_dict={'2s5s10s':[2,5,10],'5s7s10s':[5,7,10],'1s3s5s':[1,3,5],'3s5s7s':[3,5,7],'1s2s3s':[1,2,3]}
-    flys=['2s5s10s','5s7s10s','1s3s5s','3s5s7s','1s2s3s']  # Desired flys
+    flys=['2s5s10s','5s7s10s','1s3s5s','3s5s7s','1s2s3s']
     
     tenors=[]
-    for each in flys:  # Put all tenor points together in one list
+    for each in flys:
         tenors=tenors+Convert_dict[each]
     
     rlt={}
-    for tbl in df_dict.keys(): 
+    for tbl in df_dict.keys():
         indx = df_dict[tbl].index.tolist()  # get index
         s=[]
-        for each in indx: 
+        for each in indx: # for each curve, compute spread between t1 and t2 
             kwarg = df_dict[tbl].loc[each].to_dict()
             yc = YieldCurve(**kwarg)
-            ylds=yc.build_curve(tenors) # Interpolate yields for all tenor points
-            s.append([2*y-z-x for x,y,z in zip(ylds[0::3],ylds[1::3],ylds[2::3])])
-        key=tbl+"Flys"  # Construct desired table name
+            ylds=yc.build_curve(tenors)
+            s.append([-2*y+z+x for x,y,z in zip(ylds[0::3],ylds[1::3],ylds[2::3])])
+        key=tbl+"Flys"
         df=pd.DataFrame(s, index=indx,columns=flys)
-        df.index.name='Date'  # Set index name
+        df.index.name='Date'
         rlt[key]=df
     return rlt        
 
 def RollDown(df_dict):
-    """Compute RollDown for each date in each given dataframe
-    df_dict: a dictionary of dataframes extracted from YieldsData database
-    """
-    tenors=list(df_dict.values()[0])  # Get all tenors for yields
-    prd=['3m'] * (len(tenors)-1)  # Define 3m rolldown periods
+    tenors=list(df_dict.values()[0])
+    prd=['3m'] * (len(tenors)-1)
     
-    for each in df_dict.keys():  # Find Spot Curves
+    for each in df_dict.keys():
         if each.endswith("Spot"):
             spottbl=each
             spot_vals=df_dict[each].values.tolist()
             spot_idx=df_dict[each].index.tolist()
     rlt={}
-    for tbl in df_dict.keys():  # Compute rolldown for each df. Spot Curves and Forward Curves have different methods
-        if tbl.endswith("Spot"):  
+    for tbl in df_dict.keys():
+        if tbl.endswith("Spot"):
             roll_down_list = []
             for vals in spot_vals:
                 kwarg = dict(zip(tenors, vals))
@@ -386,38 +401,35 @@ def RollDown(df_dict):
             key=tbl+'RD'
             rlt[key]=df
             
-        else:  # For forward curves
-            f=tbl[-2:]  # Get forward period first
+        else:
+            f=tbl[-2:]
             roll_down_list = []
             indx=df_dict[tbl].index.tolist()
             dels=[]
             for each in indx:
-                if each in spot_idx: # Match forward curve dates and spot curve dates 
+                if each in spot_idx:
                     s=df_dict[spottbl].loc[each].to_dict()
                     kwarg=df_dict[tbl].loc[each].to_dict()
                     y=YieldCurve(**kwarg)
                     rd=y.calc_roll_down(tenors[1:],prd,s,f)
                     roll_down_list.append(rd)
                 else: 
-                    dels.append(each)  # Delete unmatched dates
+                    dels.append(each)
             for each in dels:
                 indx.remove(each)
             df = pd.DataFrame(roll_down_list, index=indx,columns=tenors[1:]) 
-            df.index.name='Date'  # Set index name
-            key=tbl+'RD'  # Set table name
+            df.index.name='Date'
+            key=tbl+'RD'
             rlt[key]=df
     return rlt
 
 
 def Carry(df_dict):
-    """Compute 3m Carry for each date of spot curves
-    df_dict: a dictionary of dataframes extracted from YieldsData database
-    """
     tenors=list(df_dict.values()[0])
     prd=['3m'] * (len(tenors)-1)    
     
     rlt={}
-    for each in df_dict.keys():  # Find spot curves and forward 3m curves
+    for each in df_dict.keys():
         if each.endswith("Spot"):
             key=each
             spottbl=df_dict[each]
@@ -428,7 +440,7 @@ def Carry(df_dict):
     
     dels=[]
     carry_list = []
-    for each in spot_idx:  # Compute 3m Carry for spot curves
+    for each in spot_idx:
         if each in fwd_idx:
             s = spottbl.loc[each].to_dict()
             f = fwdtbl.loc[each].to_dict()
@@ -440,19 +452,16 @@ def Carry(df_dict):
         spot_idx.remove(each)
     df = pd.DataFrame(carry_list, index=spot_idx,columns=tenors[1 :]) 
     df.index.name='Date'
-    key=key+'Carry'  # Set carry table names
+    key=key+'Carry'
     rlt[key]=df
     return rlt
    
 def TotalReturn(df_dict):
-    """Compute 3m TotalReturn for each date of spot curves
-    df_dict: a dictionary of dataframes extracted from YieldsData database
-    """
     tenors=list(df_dict.values()[0])
     prd=['3m'] * (len(tenors)-1)    
     
     rlt={}
-    for each in df_dict.keys():  # Find spot curves and forward 3m curves
+    for each in df_dict.keys():
         if each.endswith("Spot"):
             key=each
             spottbl=df_dict[each]
@@ -463,7 +472,7 @@ def TotalReturn(df_dict):
     
     dels=[]
     tr_list = []
-    for each in spot_idx:  # Compute 3m Carry for spot curves
+    for each in spot_idx:
         if each in fwd_idx:
             s = spottbl.loc[each].to_dict()
             f = fwdtbl.loc[each].to_dict()
@@ -475,39 +484,38 @@ def TotalReturn(df_dict):
         spot_idx.remove(each)
     df = pd.DataFrame(tr_list, index=spot_idx,columns=tenors[1 :]) 
     df.index.name='Date'
-    key=key+'TR'  # Set carry table names
+    key=key+'TR'
     rlt[key]=df
     return rlt
 
 def SpreadsFlysVol(df_dict,crsr,frequency='d'):
-    """Compute 3m Rolling Volatility for Spreads and Flys
-    df_dict: a dictionary of dataframes extracted from YieldsData database
-    crsr: crsr from TempData database
-    frequency: frequency of spreads and flys. Used when convert to annual volatility
-    """
     frequency_dict={'d':252,'w':52, 'm':12, 'a':1}
-    tbls1=[x+'Spreads' for x in df_dict.keys()]  # Get Spreads table names
-    tbls2=[x+'Flys' for x in df_dict.keys()]  # Get Flys table names
+    tbls1=[x+'Spreads' for x in df_dict.keys()]
+    tbls2=[x+'Flys' for x in df_dict.keys()]
 
-    if len(df_dict.values()[0])>60:  # Spreads/Flys tables don't exist in database 
-        spreads_dict=Tables2DF(crsr,*tbls1) # Extract full range of Spreads table from database
-        flys_dict=Tables2DF(crsr,*tbls2)  # Extract full range of Flys table from database
-    else:  # Spreads/Flys tables already exist in database 
-        spreads_dict=Tables2DF(crsr,*tbls1,LB='1y')  # Extract up to 1 year before of Spreads table from database
-        flys_dict=Tables2DF(crsr,*tbls2,LB='1y')  # Extract up to 1 year before of Flys table from database
+    if len(df_dict.values()[0])>60:
+        spreads_dict=Tables2DF(crsr,*tbls1)
+        flys_dict=Tables2DF(crsr,*tbls2)
+    else:
+        spreads_dict=Tables2DF(crsr,*tbls1,LB='1y')
+        flys_dict=Tables2DF(crsr,*tbls2,LB='1y')
     
     
     rlt1={}
     rlt2={}
-    for key1,df1 in spreads_dict.items():  # Compute 3m rolling window volatility for Spreads
+    for key1,df1 in spreads_dict.items():
         df1.sort_index(inplace=True)
+        df1=df1.diff()
+        df1=df1.dropna()
         v1=df1.rolling(window=66).std()*np.sqrt(frequency_dict[frequency])
         v1=v1.dropna()
         key1=key1+'Vol'
         rlt1[key1]=v1
     
-    for key2,df2 in flys_dict.items():  # Compute 3m rolling window volatility for Flys
+    for key2,df2 in flys_dict.items():
         df2.sort_index(inplace=True)
+        df2=df2.diff()
+        df2=df2.dropna()
         v2=df2.rolling(window=66).std()*np.sqrt(frequency_dict[frequency])
         v2=v2.dropna()
         key2=key2+'Vol'
@@ -516,22 +524,19 @@ def SpreadsFlysVol(df_dict,crsr,frequency='d'):
     return rlt1,rlt2
     
 def YieldsVol(df_dict,crsr,frequency='d'):
-    """Compute 3m Rolling Volatility for Yields
-    df_dict: a dictionary of dataframes extracted from YieldsData database
-    crsr: crsr from YieldsData database
-    frequency: frequency of Yields. Used when convert to annual volatility
-    """
     frequency_dict={'d':252,'w':52, 'm':12, 'a':1}
-    tbls=df_dict.keys()  # Table names of Yields in database
+    tbls=df_dict.keys()
     
-    if len(df_dict.values()[0])>60:  # Get full range 
+    if len(df_dict.values()[0])>60:
         ylds_dict=Tables2DF(crsr,*tbls)
-    else:  # Get part of tables
+    else:
         ylds_dict=Tables2DF(crsr,*tbls,LB='1y')
     
     rlt1={}
-    for key,df in ylds_dict.items():  # Compute 3m rolling window volatility
+    for key,df in ylds_dict.items():
         df.sort_index(inplace=True)
+        df=df.diff()
+        df=df.dropna()
         v=df.rolling(window=66,min_periods=66).std()*np.sqrt(frequency_dict[frequency])
         v=v.dropna()
         key=key+'Vol'
@@ -542,75 +547,65 @@ def YieldsVol(df_dict,crsr,frequency='d'):
     
     
 def AdjRD(df_dict,crsr):
-    """Compute AdjRD for Yields
-    df_dict: a dictionary of dataframes extracted from YieldsData database
-    crsr: crsr from TempData database
-    """
-    tbls1=[x+'RD' for x in df_dict.keys()]  # Get RollDown table names 
-    tbls2=[x+'Vol' for x in df_dict.keys()]  # Get Yields Volatility table names
-    if len(df_dict.values()[0])>60:  # Get full range 
+    tbls1=[x+'RD' for x in df_dict.keys()]
+    tbls2=[x+'Vol' for x in df_dict.keys()]
+    if len(df_dict.values()[0])>60:
         RD_dict=Tables2DF(crsr,*tbls1)
         vols_dict=Tables2DF(crsr,*tbls2)
-    else:  # Get part of tables
+    else:
         RD_dict=Tables2DF(crsr,*tbls1,LB='1y')
         vols_dict=Tables2DF(crsr,*tbls2,LB='1y')
     
     rlt={}
-    for key,df in RD_dict.items(): # Compute Adj RD
-        key2=key[: -2]+'Vol' 
-        df2=vols_dict[key2]  # Find matched vol table
-        idx2=df2.index.tolist() 
+    for key,df in RD_dict.items():
+        key2=key[: -2]+'Vol'
+        df2=vols_dict[key2]
+        idx2=df2.index.tolist()
         idx1=df.index.tolist()
-        idx=list(set(idx1).intersection(idx2))  # Find Same index between two dataframes
-        idx.sort() 
-        df=df.loc[idx]  # Get Cleaned RD dataframe
-        df2=df2.loc[idx]  # Get Cleaned Vol Dataframe
-        df2.drop('3m',1,inplace=True)  # RD don't have 3m tenor
-        ard=df.div(df2)  # AdjRD=RD/Vol
-        key3=key[: -2]+'AdjRD'  # Construct table names
+        idx=list(set(idx1).intersection(idx2))
+        idx.sort()
+        df=df.loc[idx]
+        df2=df2.loc[idx]
+        df2=df2[df.columns]
+        ard=df.div(df2)
+        key3=key[: -2]+'AdjRD'
         rlt[key3]=ard
     return rlt
 
 def AdjCarryTR(df_dict,crsr):
-    """Compute AdjCarry/ AdjTotalReturn for Spot Yields
-    df_dict: a dictionary of dataframes extracted from YieldsData database
-    crsr: crsr from TempData database
-    """
-    for each in df_dict.keys():  # Find Spot Curves and construct table names
+    for each in df_dict.keys():
         if each.endswith('Spot'):
             tbl1=each+'Carry'
             tbl2=each+'Vol'
             tbl3=each+'TR'
     
-    if len(df_dict.values()[0])>60: # Get full range
+    if len(df_dict.values()[0])>60:
         dfs=Tables2DF(crsr,tbl1,tbl2,tbl3)
-    else:  # Get part of tables
+    else:
         dfs=Tables2DF(crsr,tbl1,tbl2,tbl3,LB='1y')
     
     rlt={}
-    df1=dfs[tbl1]  # Carry dataframe
-    df2=dfs[tbl2]  # Volatility dataframe
-    df3=dfs[tbl3]  # Total Return dataframe
+    df1=dfs[tbl1]
+    df2=dfs[tbl2]
+    df3=dfs[tbl3]
     idx2=df2.index.tolist()
     idx1=df1.index.tolist()
     idx3=df3.index.tolist()
-    idx_c=list(set(idx1).intersection(idx2))  # Find same index between Carry and Vols
+    idx_c=list(set(idx1).intersection(idx2))
     idx_c.sort()
-    idx_tr=list(set(idx3).intersection(idx2))  # Find same index between Total Return and Vols
+    idx_tr=list(set(idx3).intersection(idx2))
     idx_tr.sort()
     
-    # Compute Vol adjusted carry
-    df1=df1.loc[idx_c]  
+    df1=df1.loc[idx_c]
     df2_c=df2.loc[idx_c]
-    df2_c.drop('3m',1,inplace=True)
+    df2_c=df2[df1.columns]
     ac=df1.div(df2_c)
     key3=tbl1[:-5]+'AdjCarry'
     rlt[key3]=ac
     
-    # Compute Vol adjusted total return
     df3=df3.loc[idx_tr]
     df2_tr=df2.loc[idx_tr]
-    df2_tr.drop('3m',1,inplace=True)
+    df2_tr=df2[df3.columns]
     atr=df3.div(df2_tr)
     key4=tbl3[:-2]+'AdjTR'
     rlt[key4]=atr    
@@ -619,22 +614,18 @@ def AdjCarryTR(df_dict,crsr):
     
     
 def SpreadsFlysTR(df_dict):
-    """Compute Spreads/Flys TotalReturn
-    df_dict: a dictionary of dataframes extracted from YieldsData database
-    """
     Convert_dict1={'2s5s':['2y','5y'],'5s10s':['5y','10y'],'2s10s':['2y','10y'],'1s2s':['1y','2y'],'2s3s':['2y','3y'],'1s3s':['1y','3y'],'3s5s':['3y','5y'],'5s7s':['5y','7y']}
     spreads=['2s5s','5s10s','2s10s','1s2s','2s3s','1s3s','3s5s','5s7s']
     
     Convert_dict2={'2s5s10s':['2y','5y','10y'],'5s7s10s':['5y','7y','10y'],'1s3s5s':['1y','3y','5y'],'3s5s7s':['3y','5y','7y'],'1s2s3s':['1y','2y','3y']}
     flys=['2s5s10s','5s7s10s','1s3s5s','3s5s7s','1s2s3s']
     
-    # Put all spreads tenors together
-    tenors1=[] 
+    
+    tenors1=[]
     for each in spreads:
         tenors1=tenors1+Convert_dict1[each]
     prd1 = ['3m'] * len(tenors1)
     
-    # Put all flys tenors together
     tenors2=[]
     for each in flys:
         tenors2=tenors2+Convert_dict2[each]
@@ -665,7 +656,7 @@ def SpreadsFlysTR(df_dict):
                     tr1=SC.calc_total_return(tenors1,prd1)
                     tr2=SC.calc_total_return(tenors2,prd2)
                     r1.append([x-y for x,y in zip(tr1[1::2],tr1[0::2])])
-                    r2.append([2*y-z-x for x,y,z in zip(tr2[0::3],tr2[1::3],tr2[2::3])])
+                    r2.append([-2*y+z+x for x,y,z in zip(tr2[0::3],tr2[1::3],tr2[2::3])])
                 else: dels.append(each)
             else:
                 if each in spot_idx:  # For forward curves, compute spread roll down
@@ -675,7 +666,7 @@ def SpreadsFlysTR(df_dict):
                     tr1=yy.calc_roll_down(tenors1,prd1,s_dict,tbl[-2:])
                     tr2=yy.calc_roll_down(tenors2,prd2,s_dict,tbl[-2:])
                     r1.append([x-y for x,y in zip(tr1[1::2],tr1[0::2])])
-                    r2.append([2*y-z-x for x,y,z in zip(tr2[0::3],tr2[1::3],tr2[2::3])])
+                    r2.append([-2*y+z+x for x,y,z in zip(tr2[0::3],tr2[1::3],tr2[2::3])])
                 else: dels.append(each)
         for each in dels:
             indx.remove(each)
@@ -683,28 +674,24 @@ def SpreadsFlysTR(df_dict):
         rd1.index.name='Date'
         key1=tbl+'SpreadsRD'
         rlt1[key1]=rd1
-        rd2=pd.DataFrame(r2, index=indx,columns=flys) # Construct a fly TR dataframe  
+        rd2=pd.DataFrame(r2, index=indx,columns=flys) # Construct a spread TR dataframe  
         rd2.index.name='Date'
         key2=tbl+'FlysRD'
         rlt2[key2]=rd2
     return rlt1,rlt2
     
 def AdjSpreadsTR(df_dict,crsr):
-    """Compute Adj Spreads TotalReturn
-    df_dict: a dictionary of dataframes extracted from YieldsData database
-    """
-    tbls1=[x+'SpreadsRD' for x in df_dict.keys()]  # Get Spreads RD
-    tbls2=[x+'SpreadsVol' for x in df_dict.keys()]  # Get Spreads Vol
-    
-    if len(df_dict.values()[0])>60:  # Get full range table
+    tbls1=[x+'SpreadsRD' for x in df_dict.keys()]
+    tbls2=[x+'SpreadsVol' for x in df_dict.keys()]
+    if len(df_dict.values()[0])>60:
         RD_dict=Tables2DF(crsr,*tbls1)
         vols_dict=Tables2DF(crsr,*tbls2)
-    else:  # Get part of table
+    else:
         RD_dict=Tables2DF(crsr,*tbls1,LB='1y')
         vols_dict=Tables2DF(crsr,*tbls2,LB='1y')
     
     rlt={}
-    for key,df in RD_dict.items():  # Compute adjSpreadRD
+    for key,df in RD_dict.items():
         key2=key[:-2]+'Vol'
         df2=vols_dict[key2]
         idx2=df2.index.tolist()
@@ -720,21 +707,17 @@ def AdjSpreadsTR(df_dict,crsr):
     
     
 def AdjFlysTR(df_dict,crsr):
-    """Compute Adj Flys TotalReturn
-    df_dict: a dictionary of dataframes extracted from YieldsData database
-    """
-    tbls1=[x+'FlysRD' for x in df_dict.keys()]  # Get Flys RD
-    tbls2=[x+'FlysVol' for x in df_dict.keys()]  # Get Flys Vol
-    
-    if len(df_dict.values()[0])>60:  # Get full range table
+    tbls1=[x+'FlysRD' for x in df_dict.keys()]
+    tbls2=[x+'FlysVol' for x in df_dict.keys()]
+    if len(df_dict.values()[0])>60:
         RD_dict=Tables2DF(crsr,*tbls1)
         vols_dict=Tables2DF(crsr,*tbls2)
-    else:  # Get part of table
+    else:
         RD_dict=Tables2DF(crsr,*tbls1,LB='1y')
         vols_dict=Tables2DF(crsr,*tbls2,LB='1y')
     
     rlt={}
-    for key,df in RD_dict.items():  # Compute adjFlyRD
+    for key,df in RD_dict.items():
         key2=key[:-2]+'Vol'
         df2=vols_dict[key2]
         idx2=df2.index.tolist()
