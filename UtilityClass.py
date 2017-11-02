@@ -8,25 +8,40 @@ class UtilityClass:
     """Calculate Z_score of a given time series"""
     
     @staticmethod
-    def z_score(series_list,symmetric):
+    def z_score(series_list,symmetric,*full):
         """Calculate z_score"""
         mu = np.mean(series_list)
         sigma = np.std(series_list)
-        if symmetric:
-            
-            return (series_list[-1]-mu)/sigma
-        # if the series is not symmetric, compute two different sigma
+
+        if full==():
+            if symmetric:
+                
+                return (series_list[-1]-mu)/sigma
+            # if the series is not symmetric, compute two different sigma
+            else:
+                below_aver = list(filter(lambda x: x < mu, series_list))
+                above_aver = list(filter(lambda x: x > mu, series_list))
+                sigma_neg = np.std(below_aver)
+                sigma_pos = np.std(above_aver)
+                if series_list[-1]>mu:
+                    return (series_list[-1]-mu)/sigma_pos
+                else:
+                    return (series_list[-1]-mu)/sigma_neg
         else:
-            #print series_list[-1][0]
+            rlt=[]
             below_aver = list(filter(lambda x: x < mu, series_list))
             above_aver = list(filter(lambda x: x > mu, series_list))
             sigma_neg = np.std(below_aver)
             sigma_pos = np.std(above_aver)
-            if series_list[-1]>mu:
-                return (series_list[-1]-mu)/sigma_pos
-            else:
-                return (series_list[-1]-mu)/sigma_neg
-    
+            for each in series_list:
+                if symmetric:
+                    rlt.append((each-mu)/sigma)
+                else:
+                    if each>mu:
+                        rlt.append((each-mu)/sigma_pos)
+                    else:
+                        rlt.append((each-mu)/sigma_neg)
+            return rlt
     @staticmethod
     def calc_z_score(df, symmetric, *choice):
         """Calculate Z_score
@@ -38,7 +53,8 @@ class UtilityClass:
         
         if no choices, return single point. Otherwise, return a list
         """
-        series_list=df[df.columns[0]].values # Get series values
+        
+        series_list=df[df.columns[0]].tolist() # Get series values
         idx=df.index.tolist()  
         idx_now=idx[-1]
         zscore=UtilityClass.z_score(series_list,symmetric) # Compute last day's z score
@@ -73,6 +89,11 @@ class UtilityClass:
                     series_list=df1[df1.columns[0]].values
                     lvl.append(series_list[-1])
                     zscore.append(UtilityClass.z_score(series_list,symmetric))
+                if each=='all':
+                    zscore=[]
+                    lvl=series_list
+                    zscore=zscore+UtilityClass.z_score(series_list,symmetric,True)
+                          
         #print zscore
         return lvl, zscore        
                                                
@@ -88,10 +109,8 @@ class UtilityClass:
         """
         pctl=[]
         series_list=df[df.columns[0]].values
-        #print series_list
         idx=df.index.tolist()
         idx_now=idx[-1]
-        #print series_list[-1]
         pctl=stats.percentileofscore(series_list,series_list[-1],kind='weak')/100  #Compute last data's percentile 
         
         if choice != (): # Compute given choices's percentile

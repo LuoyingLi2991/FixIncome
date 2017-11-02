@@ -5,11 +5,333 @@ import numpy as np
 import pyodbc
 from dateutil.relativedelta import relativedelta
 from YieldCurve import YieldCurve
+from SpotCurve import SpotCurve
 from UtilityClass import UtilityClass
 import datetime
-import os
-import win32com.client
+#import os
+#import win32com.client
 
+
+def convertT(t):
+    """Function convert tenors to number e.g 3m->0.35 , 1y->1
+    t: either a single tenor or a list of tenors
+    """
+    if isinstance(t,list):  # if t is a list 
+        tt=[]
+        for i,each in enumerate(t):
+            if each[-1]=='m':
+                tt.append(float(each[:-1])/12)  # convert month tenor to number
+            else:
+                tt.append(int(each[:-1]))  # convert year tenor to number
+    else:  # Convert single tenor
+        if t[-1]=='m':
+            tt=float(t[:-1])/12
+        else:
+            tt=int(t[:-1])
+    return tt
+
+def FormatTables(crsrs,tbls,LB):
+    """Function both spot and forward tables from database based on table names(tbls) and LookBackWindow(LB) and Format both tables to have same index"""
+    if LB=='ALL':
+        df=Tables2DF(crsrs,*tbls)
+    else:  
+        df=Tables2DF(crsrs,*tbls,lb=LB)
+    
+    spot=df[tbls[0]]  
+    fwd=df[tbls[1]]
+
+    idx1=spot.index.tolist()
+    idx2=fwd.index.tolist()
+    idx=list(set(idx1).intersection(idx2))  # Find same index 
+    idx.sort()
+    spot=spot.loc[idx]  # Filter Spot to same index
+    fwd=fwd.loc[idx]  # Filter Forward to same index
+    return spot,fwd,idx
+
+
+@xw.func
+@xw.ret(expand='table')
+def CalculatorsDF(Country,LB,AssetType,Curve,tenor1,tenor2,tenor3,path):
+    """Calculate Level/Spread, Rolldown, Vol Adjusted Rolldown Based on attributes passed
+    Country: Desired Country
+    LB: LookBackWindow
+    AssetType: Level/Spread/Fly
+    Curve: Indicating if the curve is spot curve or forward curve
+    tenor1: first tenor
+    tenor2: second tenor
+    tenor3: third tenor
+    path: directory of database
+    """
+    # Connect to YieldData database
+    YldsDB1= 'DBQ='+str(path+ '\\YieldsData.accdb')
+    conn1 = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};' + YldsDB1)
+    [crsr1,cnxn1]=Build_Access_Connect(conn1)  # Connect to MS Access
+    crsrs=[(crsr1,cnxn1)]
+        
+    lvls=[]
+    rd=[]
+    if Curve=='Spot': # if curve belongs to spot curve
+        tbls=[Country+Curve,Country+'Fwd3m']
+        [spot,fwd,idx]=FormatTables(crsrs,tbls,LB)  # Get Spot and Forward 3m Yields tables for this country
+        for each in idx:  # Construct YieldCurve and SpotCurve object for each row and Calculate Rolldown 
+            k1=spot.loc[each].to_dict()
+            k2=fwd.loc[each].to_dict()
+            yc=YieldCurve(**k1)
+            sc=SpotCurve(k1,k2)
+            if AssetType=='Spread':  # Calculate Spread and Spread rolldown
+                tenors=[tenor1,tenor2]
+                s=yc.build_curve(convertT(tenors))
+                lvls.append(s[1]-s[0])
+                rs=sc.calc_total_return(tenors,['3m']*len(tenors))
+                rd.append(rs[1]-rs[0])
+            elif AssetType=='Fly':  # Calculate FLys and Flys rolldown
+                tenors=[tenor1,tenor2,tenor3]
+                s=yc.build_curve(convertT(tenors))
+                lvls.append(-2*s[1]+s[2]+s[0])
+                rs=sc.calc_total_return(tenors,['3m']*len(tenors))
+                rd.append(-2*rs[1]+rs[2]+rs[0])
+            else:  # Calculate yield level and level rolldown 
+                tenors=tenor1
+                lvls.append(yc.build_curve(convertT(tenors)))
+                rd.append(sc.calc_total_return(tenors,'3m'))
+    else:  # Curve belongs to forward curve
+        tbls=[Country+'Spot',Country+Curve]
+        [spot,fwd,idx]=FormatTables(crsrs,tbls,LB)  # Get Desired forward curve and spot curve
+        for each in idx: # Construct YieldCurve and SpotCurve object for each row and Calculate Rolldown 
+            k1=spot.loc[each].to_dict()
+            k2=fwd.loc[each].to_dict()
+            yc=YieldCurve(**k2)
+            if AssetType=='Spread':  # Calculate Spread and Spread rolldown
+                tenors=[tenor1,tenor2]
+                s=yc.build_curve(convertT(tenors))
+                lvls.append(s[1]-s[0])
+                rs=yc.calc_roll_down(tenors,['3m']*len(tenors),k1,tbls[1][-2:])
+                rd.append(rs[1]-rs[0])
+            elif AssetType=='Fly':  # Calculate FLys and Flys rolldown
+                tenors=[tenor1,tenor2,tenor3]
+                s=yc.build_curve(convertT(tenors))
+                lvls.append(-2*s[1]+s[2]+s[0])
+                rs=yc.calc_roll_down(tenors,['3m']*len(tenors),k1,tbls[1][-2:])
+                rd.append(-2*rs[1]+rs[2]+rs[0])
+            else:  # Calculate yield level and level rolldown 
+                tenors=tenor1
+                lvls.append(yc.build_curve(convertT(tenors)))
+                rd.append(yc.calc_roll_down(tenors,'3m',k1,tbls[1][-2:]))
+    rlt=pd.DataFrame(lvls,index=idx,columns=['Level'])  # Construct a dataframe
+    rlt['rolldown']=rd  # Add rolldown column
+    rlt['dy']=rlt['Level'].diff()  # Get yield difference
+    rlt=rlt.dropna() 
+    rlt['vol']=rlt['dy'].rolling(window=66).std()*np.sqrt(252)  # 3m rolling window for dyield
+    rlt=rlt.dropna()
+    rlt['AdjRD']=rlt['rolldown']/rlt['vol']  # Calc Vol Adjusted rolldown
+    u=UtilityClass()
+    z=u.calc_z_score(rlt['AdjRD'].to_frame(),False,'all')[1]  # Calc Z score for vol adjusted rolldown
+    rlt['AdjRDZscore']=z
+    AdjRD=rlt['AdjRD'].tolist()
+    rlt.drop(['dy','vol','AdjRD'],axis=1,inplace=True)  # Delete unwanted tables
+    headers=list(rlt)
+    H=['L','R','Z']
+    for each, h in zip(headers,H):  # Add columns 'Aver', '+1sd','-1sd', '+2sd', '-2sd' for 'Level', 'rolldown' and 'Zscore'
+        rlt['aver'+h]=[np.mean(rlt[each].tolist())]*len(rlt[each].tolist())
+        std=np.std(rlt[each].tolist())
+        rlt['+1sd'+h]=[rlt['aver'+h].values[0]+std]*len(rlt[each].tolist())  #  1 std above average
+        rlt['-1sd'+h]=[rlt['aver'+h].values[0]-std]*len(rlt[each].tolist())  #  1 std below average
+        rlt['+2sd'+h]=[rlt['aver'+h].values[0]+2*std]*len(rlt[each].tolist())  #  2 std above average
+        rlt['-2sd'+h]=[rlt['aver'+h].values[0]-2*std]*len(rlt[each].tolist()) 
+    headers=['Level','averL','+1sdL','-1sdL','+2sdL','-2sdL','rolldown','averR','+1sdR','-1sdR','+2sdR','-2sdR',
+             'AdjRDZscore','averZ','+1sdZ','-1sdZ','+2sdZ','-2sdZ']  
+    rlt=rlt[headers]  # Format Dataframe to desired column sequence
+    rlt['AdjRD']=AdjRD  # Add AdjRD Column
+    return rlt
+
+@xw.func
+@xw.arg('df', pd.DataFrame, index=True, header=True)  # Get Dataframe from Excel GUI
+def CalcTbl(df,Country,Asset,Curve,tenor1,tenor2,tenor3):
+    """This Function formulates a table that contains Today, 1 week before and 1 month before's level/Spread, rolldown, vol adjusted rolldown and their zscore and percentile
+    df: Dataframe read from Excel GUI. This Dataframe is also the result calculated from 'CalculatorsDF' function
+    Asset: Asset Type, possible choices: Level, Spread and Fly
+    tenor1: First tenor
+    tenor2: second tenor
+    tenor3 third tenor
+    """
+    df1 = df[['Level','rolldown','AdjRD']]  # Select columns to a new dataframe
+    L=df1['Level'].to_frame()  # Convert Column to Dataframe
+    L.rename(columns={'Level':'TTT'}, inplace=True)  # Change Column name 
+    R=df1['rolldown'].to_frame() # Convert Column to Dataframe
+    R.rename(columns={'rolldown':'TTT'}, inplace=True) # Change Column name 
+    A=df1['AdjRD'].to_frame() # Convert Column to Dataframe
+    A.rename(columns={'AdjRD':'TTT'}, inplace=True) # Change Column name 
+    df_dict={'L':L,'R':R,'A':A}  # Create a dataframe dictionary
+    headers=['TTT']
+    tbls=['L','R','A']
+    if Asset=='Level':  # If asset type is Level, set corresponding tenor, header, index and calculate result table
+        tenor=Curve+tenor1
+        rlt_header=[['Level%']*3+['RollDown(bsp)']*3+['AdjRollDown']*3,['Lvl','Z','PCTL']*3]
+        rlt_idx=[[tenor]*3,['Today','1W Before','1M Before']]
+        rlt=GetRltDF(tbls,df_dict,headers,rlt_header,rlt_idx,True)
+        rlt.loc[:,('RollDown(bsp)','Lvl')]=rlt['RollDown(bsp)']['Lvl'].apply(lambda x: x*100)
+    elif Asset=='Spread':  # If asset type is Spread, set corresponding tenor, header, index and calculate result table
+        tenor=Curve+"/"+tenor1[:-1]+"s"+tenor2[:-1]+"s"
+        rlt_header=[['Spread(bsp)']*3+['SpreadRollDown(bsp)']*3+['SpreadAdjRollDown']*3,['Lvl','Z','PCTL']*3]
+        rlt_idx=[[tenor]*3,['Today','1W Before','1M Before']]
+        rlt=GetRltDF(tbls,df_dict,headers,rlt_header,rlt_idx)
+    else:  # If asset type is Fly, set corresponding tenor, header, index and calculate result table
+        tenor=Curve+"/"+tenor1[:-1]+"s"+tenor2[:-1]+"s"+tenor3[:-1]+"s"
+        rlt_header=[['Fly(bsp)']*3+['FlyRollDown(bsp)']*3+['FlyAdjRollDown']*3,['Lvl','Z','PCTL']*3]
+        rlt_idx=[[tenor]*3,['Today','1W Before','1M Before']]
+        rlt=GetRltDF(tbls,df_dict,headers,rlt_header,rlt_idx) 
+    rlt.index.set_labels([0,-1,-1],level=0,inplace=True)  # Change label for multiIndex
+    # Change label for multiColumnHeaders
+    l=list(rlt.columns.labels[0])
+    for i in range(2):
+        l[i*3+2]=-1
+        l[i*3+1]=-1
+    rlt.columns.set_labels(l,level=0,inplace=True)
+    rlt.index.names=(Country,None)
+    columns= list(rlt.columns.levels[0])
+    for each in columns: # Drop Adjusted Roll down's level
+        if each.endswith("AdjRollDown"):
+            rlt.drop((each,'Lvl'),axis=1,inplace=True)
+    return rlt
+
+
+
+def FormatIdx(idx):
+    """This funtion formats index into multiIndex"""
+    a=list(idx.labels[0])  # Get label from index
+    for i in range(len(a)/3):  # Format label
+        a[3*i+1]=a[3*i]
+        a[3*i+2]=a[3*i]
+    b=list(idx.labels[1])
+    label=[a,b] 
+    idx.set_labels(label,inplace=True)  # Set Labels for index
+    idx.names=(None,None)  # Set index names to None
+    return idx  # Return index
+
+
+def Convert2DF(df):
+    """This function converts tables in Excel to Dataframe"""
+    df.drop(df.index[0],inplace=True)  # Drop the first row due to the format of table read from Excel GUI
+    df1=df.T  # Transpose dataframe
+    df1.set_index([1,2], inplace=True)  # Set first two columns as index
+    h=df1.index
+    h=h[2:]  # Get Index and delete first two, as the first two are None
+    h=FormatIdx(h)  # Format Index 
+    df.set_index([0,1], inplace=True)  # Set first two columns as index for None transposed dataframe
+    idx=df.index[2:]  # Get Index and format index
+    idx=FormatIdx(idx)
+    df=df[2:]  # Delete first two rows
+    df=pd.DataFrame(df.values.tolist(),columns=h,index=idx)  # Construct MultiIndex Dataframe
+    return df
+
+
+def Filter(c1,c2,Title,*args):
+    """Select data that fullfill the criteria: location %>c1 AND RollDown%>c2
+    Title: Title of this criteria
+    *args: a list of dataframes with sequence like: location, rolldown,location,rolldown....
+    """
+    n=len(args)/2  # Get number of combinations
+    asset=[]
+    level=[]
+    RD=[]
+    P=[]
+    for i in range(n):  # For each combination, go through filter process
+        lvl=Convert2DF(args[2*i])
+        rd=Convert2DF(args[2*i+1])
+        curves=list(lvl.columns.levels[0])
+        tenors=list(rd.index.levels[0])
+        lvl1=lvl.filter(like='Today', axis=0)  # Filter Out Today's Locations
+        lvl1=lvl1.filter(like='PCTL', axis=1)  # Filter Out Percentile of Today's Locations
+        rd1=rd.filter(like='Today', axis=0)  # Filter Out Today's Rolldowns         
+        rd1=rd1.filter(like='PCTL', axis=1)  # Filter Out Percentile of Today's Rolldowns
+        for curve in curves:
+            if curve.endswith("Spot"): rdC=curve+'TR'  # RollDown table has different header names
+            else: rdC=curve+'RD' 
+            for t in tenors:  # Start filter process
+                if ((lvl1[curve].loc[t].values[0][0]>c1) or(lvl1[curve].loc[t].values[0][0]<1-c1)) and rd1[rdC].loc[t].values[0][0]>c2:
+                    level.append(lvl[curve]['Level'].loc[t]['Today'])
+                    RD.append(rd[rdC]['Level'].loc[t]['Today'])
+                    P.append(lvl[curve]['PCTL'].loc[t]['Today'])
+                    asset.append(curve+'/'+t)
+    for i,each in enumerate(P):
+        P[i]="{0:.0f}%".format(each * 100)
+    vals=[asset,level,RD,P]  
+    df=pd.DataFrame(vals,index=[[Title]*4,['Asset','Level','RollDown','Location%']])  # Construct results dataframe
+    df.index.set_labels([0,-1,-1,-1],level=0,inplace=True)  
+    df=df.T
+    if not df.empty:
+        df.index = pd.RangeIndex(1,1 + len(df))
+    return df
+    
+    
+    
+
+@xw.func
+@xw.arg('lvl', pd.DataFrame, index=False, header=False) # Yields Level Table in Excel GUI
+@xw.arg('rd', pd.DataFrame, index=False, header=False)  # RollDown Table in Excel GUI
+@xw.arg('S', pd.DataFrame, index=False, header=False)  # Spreads Table in Excel GUI
+@xw.arg('F', pd.DataFrame, index=False, header=False)  # Flys Table in Excel GUI
+@xw.arg('Srd', pd.DataFrame, index=False, header=False)  # Spreads Rolldown Table in Excel GUI
+@xw.arg('Frd', pd.DataFrame, index=False, header=False)  # Flys RollDown Table in Excel GUI
+@xw.ret(expand='table')
+def List1(lvl,rd,S,Srd,F,Frd):
+    """Display results for Criteria 1"""
+    args=[lvl,rd,S,Srd,F,Frd]
+    c1=0.8
+    c2=0.8
+    Title='Criteria: 80/80'
+    return Filter(c1,c2,Title,*args)
+
+@xw.func
+@xw.arg('lvl', pd.DataFrame, index=False, header=False) # Yields Level Table in Excel GUI
+@xw.arg('rd', pd.DataFrame, index=False, header=False)  # RollDown Table in Excel GUI
+@xw.arg('S', pd.DataFrame, index=False, header=False)  # Spreads Table in Excel GUI
+@xw.arg('F', pd.DataFrame, index=False, header=False)  # Flys Table in Excel GUI
+@xw.arg('Srd', pd.DataFrame, index=False, header=False)  # Spreads Rolldown Table in Excel GUI
+@xw.arg('Frd', pd.DataFrame, index=False, header=False)  # Flys RollDown Table in Excel GUI
+@xw.ret(expand='table')
+def List4(lvl,rd,S,Srd,F,Frd):
+    """Display results for Criteria 4"""
+    args=[lvl,rd,S,Srd,F,Frd]
+    c1=0.95
+    c2=0.4
+    Title='Criteria:95/40'
+    return Filter(c1,c2,Title,*args)
+
+
+@xw.func
+@xw.arg('lvl', pd.DataFrame, index=False, header=False) # Yields Level Table in Excel GUI
+@xw.arg('rd', pd.DataFrame, index=False, header=False)  # RollDown Table in Excel GUI
+@xw.arg('S', pd.DataFrame, index=False, header=False)  # Spreads Table in Excel GUI
+@xw.arg('F', pd.DataFrame, index=False, header=False)  # Flys Table in Excel GUI
+@xw.arg('Srd', pd.DataFrame, index=False, header=False)  # Spreads Rolldown Table in Excel GUI
+@xw.arg('Frd', pd.DataFrame, index=False, header=False)  # Flys RollDown Table in Excel GUI
+@xw.ret(expand='table')
+def List2(lvl,rd,S,Srd,F,Frd):
+    """Display results for Criteria 2"""
+    args=[lvl,rd,S,Srd,F,Frd]
+    c1=0.9
+    c2=0.6
+    Title='Criteria:90/60'
+    return Filter(c1,c2,Title,*args)
+
+@xw.func
+@xw.arg('lvl', pd.DataFrame, index=False, header=False) # Yields Level Table in Excel GUI
+@xw.arg('rd', pd.DataFrame, index=False, header=False)  # RollDown Table in Excel GUI
+@xw.arg('S', pd.DataFrame, index=False, header=False)  # Spreads Table in Excel GUI
+@xw.arg('F', pd.DataFrame, index=False, header=False)  # Flys Table in Excel GUI
+@xw.arg('Srd', pd.DataFrame, index=False, header=False)  # Spreads Rolldown Table in Excel GUI
+@xw.arg('Frd', pd.DataFrame, index=False, header=False)  # Flys RollDown Table in Excel GUI
+@xw.ret(expand='table')
+def List3(lvl,rd,S,Srd,F,Frd):
+    """Display results for Criteria 2"""
+    args=[lvl,rd,S,Srd,F,Frd]
+    c1=0.6
+    c2=0.9
+    Title='Criteria:60/90'
+    return Filter(c1,c2,Title,*args)    
+    
+    
 
 @xw.func
 @xw.ret(expand='table')
@@ -108,13 +430,22 @@ def Tables2DF(crsrs,*selected_table_name,**LookBackWindow):
     crsr=crsrs[0][0]
     cnxn=crsrs[0][1]
     
-    tbls = crsr.tables(tableType='TABLE').fetchall()  
-    for tbl in tbls:
-        if tbl.table_name not in db_schema.keys(): 
-            db_schema[tbl.table_name] = list()
-        for col in crsr.columns(table=tbl.table_name):
-            db_schema[tbl.table_name].append(col[3])
-              
+    # Get table columns and saved in dictionary
+    if selected_table_name==():
+        tbls = crsr.tables(tableType='TABLE').fetchall() 
+        for tbl in tbls:
+            if tbl.table_name not in db_schema.keys(): 
+                db_schema[tbl.table_name] = list()
+            for col in crsr.columns(table=tbl.table_name):
+                db_schema[tbl.table_name].append(col[3])
+    else:
+        for tbl in selected_table_name:
+            if tbl not in db_schema.keys(): 
+                db_schema[tbl] = list()
+            for col in crsr.columns(table=tbl):
+                db_schema[tbl].append(col[3])
+
+    
     if selected_table_name==() and LookBackWindow=={}: # Return all tables 
         df_dict=dict()
         for tbl, cols in db_schema.items():
@@ -195,17 +526,16 @@ def Tables2DF(crsrs,*selected_table_name,**LookBackWindow):
          cnxn.close() 
          return df_dict
 
-
+"""
 @xw.func
 def Repair_Compact_DB(path):
-    """Repair and Compact the DataBase"""
     oApp = win32com.client.Dispatch("Access.Application")
     srcDB=str(path+'\\TempData.accdb')
     destDB = str(path+'\\TempData_backup.accdb')
     oApp.compactRepair(srcDB,destDB)
     os.remove(destDB)
     oApp = None
-
+"""
 
 def GetTbls(TableList,LookBackWindow,TblSuffix,path):
     """Return Tables extracted from Database
@@ -217,7 +547,6 @@ def GetTbls(TableList,LookBackWindow,TblSuffix,path):
     tbls=[]  # Construct tablenames 
     for each in TableList:
         tbls.append(each+TblSuffix)
-    
     # Connect to Database
     tempDB= 'DBQ='+str(path+'\\TempData.accdb')   
     conn = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + tempDB)  #Create database connection string
@@ -254,9 +583,9 @@ def GetRltDF(tbls,df_dict,headers,rlt_cols,rlt_index,*ylds):
     """
     Values=[] 
     u=UtilityClass() 
-    
-    for tbl in tbls:  # Compute spreads for each table
+    for tbl in tbls: 
         df=df_dict[tbl].sort_index()
+        df.dropna(inplace=True)
         lvl=[]
         z=[]
         p=[]
@@ -291,7 +620,6 @@ def SpreadsTable(LookBackWindow,TableList,path):
     Output: Today, 1week and 1month's spreads level,zscore(asymmetric) and percentile    
     """
     tttt=datetime.datetime.now()
-    
     [df_dict, rlt_cols, rlt_index, spreads, spreadstbls]=GetTbls(TableList,LookBackWindow,'Spreads',path)
     rlt=GetRltDF(spreadstbls,df_dict,spreads,rlt_cols,rlt_index)
     
@@ -427,6 +755,7 @@ def AdjRollDownTable(LookBackWindow,TableList,path):
     rlt_index = [np.array(temp2), np.array(['Today', '1W Before', '1M Before']*len(tenors))]
     
     rlt=GetRltDF(tbls,df_dict,tenors,rlt_cols,rlt_index).drop('Level',axis=1,level=1)
+
     print datetime.datetime.now()-tttt
     return rlt
 
@@ -513,49 +842,7 @@ def YieldsLvLs(LookBackWindow,TableList,path):
 
 if __name__ == "__main__":
     LB='ALL'
-    #c=['KRW','SG','MY','TW','US','IN','AU','CN']
-    path='C:\\users\\luoying.li\\.spyder\\Modules'
-
-    c='KRW'
-    h=['Spot','Fwd3m','Fwd6m','Fwd1y','Fwd2y','Fwd3y','Fwd4y','Fwd5y']
-    tt=[]
-    for e in h:
-        tt.append(c+e)
-    tt.insert(0,'')
-    ttt=[tt]
-    
-
-
-    print YieldsLvLs(LB,ttt,path)
-    print SpreadsTable(LB,ttt,path)
-    print SpreadsRDTable(LB,ttt,path) 
-    print SpreadsAdjRD(LB,ttt,path)
-    print FlysAdjRD(LB,ttt,path)
-    print ButterFlysTable(LB,ttt,path)
-    print FlysRDTable(LB,ttt,path)
-    
-    '''
-    a=SpreadsRDTable(LB,ttt,path)
-    b=SpreadsAdjRD(LB,ttt,path)
-
-    db_schema={}
-    YldsDB= 'DBQ='+str('C:\\Users\\luoying.li\\.spyder\\Modules\\TempData_be.accdb')
-    conn = ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + YldsDB)
-    [crsr3,cnxn3]=Build_Access_Connect(conn) 
-    YldsDB1= 'DBQ='+str('C:\\Users\\luoying.li\\.spyder\\Modules\\TempData.accdb')
-    conn1= ('DRIVER={Microsoft Access Driver (*.mdb, *.accdb)}; ' + YldsDB1)
-    [crsr,cnxn]=Build_Access_Connect(conn1) 
-    tbls = crsr3.tables(tableType='TABLE').fetchall()  
-    for tbl in tbls:
-        if tbl.table_name not in db_schema.keys(): 
-            db_schema[tbl.table_name] = list()
-        for col in crsr3.columns(table=tbl.table_name):
-            db_schema[tbl.table_name].append(col[3])
-           
-    tblss=db_schema.keys()
-    sql = "SELECT * from %s" % tblss[0]  
-    crsr.execute(sql)
-    print crsr.fetchone()
-    cnxn.close()
-    cnxn3.close()
-    '''
+    path='P:\\Interest Rate Model'
+    tbls=[['','EURSpot']]
+    C='US'
+    AdjRollDownTable(LB,tbls,path)
