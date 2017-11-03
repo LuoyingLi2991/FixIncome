@@ -1,4 +1,9 @@
+"""
+Created on Mon Oct 09 10:33:48 2017
+@author: luoying.li
 
+This script has functions used to support Excel User Interface"
+"""
 import xlwings as xw
 import pandas as pd
 import numpy as np
@@ -169,7 +174,7 @@ def CalcTbl(df,Country,Asset,Curve,tenor1,tenor2,tenor3):
         rlt_header=[['Level%']*3+['RollDown(bsp)']*3+['AdjRollDown']*3,['Lvl','Z','PCTL']*3]
         rlt_idx=[[tenor]*3,['Today','1W Before','1M Before']]
         rlt=GetRltDF(tbls,df_dict,headers,rlt_header,rlt_idx,True)
-        rlt.loc[:,('RollDown(bsp)','Lvl')]=rlt['RollDown(bsp)']['Lvl'].apply(lambda x: x*100)
+        rlt.loc[:,('RollDown(bsp)','Lvl')]=rlt['RollDown(bsp)']['Lvl'].apply(lambda x: round(x*100,1))
     elif Asset=='Spread':  # If asset type is Spread, set corresponding tenor, header, index and calculate result table
         tenor=Curve+"/"+tenor1[:-1]+"s"+tenor2[:-1]+"s"
         rlt_header=[['Spread(bsp)']*3+['SpreadRollDown(bsp)']*3+['SpreadAdjRollDown']*3,['Lvl','Z','PCTL']*3]
@@ -274,12 +279,10 @@ def Filter(c1,c2,Title,*args):
 @xw.arg('Srd', pd.DataFrame, index=False, header=False)  # Spreads Rolldown Table in Excel GUI
 @xw.arg('Frd', pd.DataFrame, index=False, header=False)  # Flys RollDown Table in Excel GUI
 @xw.ret(expand='table')
-def List1(lvl,rd,S,Srd,F,Frd):
+def List1(lvl,rd,S,Srd,F,Frd,c1,c2):
     """Display results for Criteria 1"""
     args=[lvl,rd,S,Srd,F,Frd]
-    c1=0.8
-    c2=0.8
-    Title='Criteria: 80/80'
+    Title='Criteria: '+str(int(c1*100))+'/'+str(int(c2*100))
     return Filter(c1,c2,Title,*args)
 
 @xw.func
@@ -290,12 +293,10 @@ def List1(lvl,rd,S,Srd,F,Frd):
 @xw.arg('Srd', pd.DataFrame, index=False, header=False)  # Spreads Rolldown Table in Excel GUI
 @xw.arg('Frd', pd.DataFrame, index=False, header=False)  # Flys RollDown Table in Excel GUI
 @xw.ret(expand='table')
-def List4(lvl,rd,S,Srd,F,Frd):
+def List4(lvl,rd,S,Srd,F,Frd,c1,c2):
     """Display results for Criteria 4"""
     args=[lvl,rd,S,Srd,F,Frd]
-    c1=0.95
-    c2=0.4
-    Title='Criteria:95/40'
+    Title='Criteria: '+str(int(c1*100))+'/'+str(int(c2*100))
     return Filter(c1,c2,Title,*args)
 
 
@@ -307,12 +308,10 @@ def List4(lvl,rd,S,Srd,F,Frd):
 @xw.arg('Srd', pd.DataFrame, index=False, header=False)  # Spreads Rolldown Table in Excel GUI
 @xw.arg('Frd', pd.DataFrame, index=False, header=False)  # Flys RollDown Table in Excel GUI
 @xw.ret(expand='table')
-def List2(lvl,rd,S,Srd,F,Frd):
+def List2(lvl,rd,S,Srd,F,Frd,c1,c2):
     """Display results for Criteria 2"""
     args=[lvl,rd,S,Srd,F,Frd]
-    c1=0.9
-    c2=0.6
-    Title='Criteria:90/60'
+    Title='Criteria: '+str(int(c1*100))+'/'+str(int(c2*100))
     return Filter(c1,c2,Title,*args)
 
 @xw.func
@@ -323,12 +322,10 @@ def List2(lvl,rd,S,Srd,F,Frd):
 @xw.arg('Srd', pd.DataFrame, index=False, header=False)  # Spreads Rolldown Table in Excel GUI
 @xw.arg('Frd', pd.DataFrame, index=False, header=False)  # Flys RollDown Table in Excel GUI
 @xw.ret(expand='table')
-def List3(lvl,rd,S,Srd,F,Frd):
+def List3(lvl,rd,S,Srd,F,Frd,c1,c2):
     """Display results for Criteria 2"""
     args=[lvl,rd,S,Srd,F,Frd]
-    c1=0.6
-    c2=0.9
-    Title='Criteria:60/90'
+    Title='Criteria: '+str(int(c1*100))+'/'+str(int(c2*100))
     return Filter(c1,c2,Title,*args)    
     
     
@@ -594,7 +591,7 @@ def GetRltDF(tbls,df_dict,headers,rlt_cols,rlt_index,*ylds):
             [s_lvl,s_zscore]=u.calc_z_score(ss,False,'1w','1m')
             s_ptl=u.calc_percentile(ss,'1w','1m')
             if ylds==(): # Convert to basis points if not yields
-                temp=[x*100 for x in s_lvl]
+                temp=[round(x*100,1) for x in s_lvl]
                 s_lvl=temp
             lvl=lvl+s_lvl
             z=z+s_zscore
