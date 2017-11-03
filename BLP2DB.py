@@ -1,8 +1,17 @@
 # -*- coding: utf-8 -*-
 """
 Created on Mon Oct 09 10:33:48 2017
-
 @author: luoying.li
+
+This script has supporting function for script "UpdateDB.py"
+
+-Function bdh is to extract data from Bloomberg
+-Function DF_Merge is to merge serveral single-column dataframe into one dataframe
+-Function pd2DB write pandas dataframe to the database
+-Function removeUni converts Unicode string read from Excel Interfacec to UTF-8 code
+-Function Table2DF extracts data from Database and summarizes data into dataframe
+-Functions Spreads,Flys,Rolldown,Carry,TotalReturn,SpreadsFlysVol,YieldsVol,
+SpreadsFlysTR,AdjSpreadsTR,AdjFlysTR,AdjRD are supporting functions to compute intermediary data
 """
 import blpapi
 from collections import defaultdict
@@ -332,6 +341,7 @@ def Tables2DF(crsr,*selected_table_name,**LookBackWindow):
 
 
 def Spreads(df_dict):
+    """Compute Spreads for each row of each dataframe in df_dict and return a dictionary of dataframe of spreads"""
     Convert_dict={'2s5s':[2,5],'5s10s':[5,10],'2s10s':[2,10],'1s2s':[1,2],'2s3s':[2,3],'1s3s':[1,3],'3s5s':[3,5],'5s7s':[5,7]}
     spreads=['2s5s','5s10s','2s10s','1s2s','2s3s','1s3s','3s5s','5s7s']  # desired spreads
     
@@ -349,47 +359,49 @@ def Spreads(df_dict):
             yc = YieldCurve(**kwarg)
             ylds=yc.build_curve(tenors)
             s.append([x-y for x,y in zip(ylds[1::2],ylds[0::2])])
-        key=tbl+"Spreads"
+        key=tbl+"Spreads"  # Construct table names 
         df=pd.DataFrame(s, index=indx,columns=spreads)
-        df.index.name='Date'
+        df.index.name='Date'  # Set index name
         rlt[key]=df
     return rlt
 
 def Flys(df_dict):
+    """Compute Flys for each row of each dataframe in df_dict and return a dictionary of dataframe of flys"""
     Convert_dict={'2s5s10s':[2,5,10],'5s7s10s':[5,7,10],'1s3s5s':[1,3,5],'3s5s7s':[3,5,7],'1s2s3s':[1,2,3]}
     flys=['2s5s10s','5s7s10s','1s3s5s','3s5s7s','1s2s3s']
     
     tenors=[]
-    for each in flys:
+    for each in flys:  # Merge all tenors of flys into one lists
         tenors=tenors+Convert_dict[each]
     
     rlt={}
     for tbl in df_dict.keys():
         indx = df_dict[tbl].index.tolist()  # get index
         s=[]
-        for each in indx: # for each curve, compute spread between t1 and t2 
+        for each in indx: # for each curve, compute flys between t1 and t2 
             kwarg = df_dict[tbl].loc[each].to_dict()
             yc = YieldCurve(**kwarg)
             ylds=yc.build_curve(tenors)
             s.append([-2*y+z+x for x,y,z in zip(ylds[0::3],ylds[1::3],ylds[2::3])])
-        key=tbl+"Flys"
+        key=tbl+"Flys" # Construct table names 
         df=pd.DataFrame(s, index=indx,columns=flys)
         df.index.name='Date'
         rlt[key]=df
     return rlt        
 
 def RollDown(df_dict):
+    """Compute 3m rolldown for each row of each dataframe in df_dict and return a dictionary of dataframe of rolldown"""
     tenors=list(df_dict.values()[0])
     prd=['3m'] * (len(tenors)-1)
     
     for each in df_dict.keys():
-        if each.endswith("Spot"):
+        if each.endswith("Spot"):  # Find Spot Curve
             spottbl=each
             spot_vals=df_dict[each].values.tolist()
             spot_idx=df_dict[each].index.tolist()
     rlt={}
     for tbl in df_dict.keys():
-        if tbl.endswith("Spot"):
+        if tbl.endswith("Spot"):  # Compute rolldown for spot curve
             roll_down_list = []
             for vals in spot_vals:
                 kwarg = dict(zip(tenors, vals))
@@ -401,13 +413,13 @@ def RollDown(df_dict):
             key=tbl+'RD'
             rlt[key]=df
             
-        else:
+        else:   # Compute rolldown for forward curve
             f=tbl[-2:]
             roll_down_list = []
             indx=df_dict[tbl].index.tolist()
             dels=[]
             for each in indx:
-                if each in spot_idx:
+                if each in spot_idx:   # Starting from matched index
                     s=df_dict[spottbl].loc[each].to_dict()
                     kwarg=df_dict[tbl].loc[each].to_dict()
                     y=YieldCurve(**kwarg)
@@ -425,22 +437,23 @@ def RollDown(df_dict):
 
 
 def Carry(df_dict):
+    """Calculate 3m Carry for Spot Curve in df_dict"""
     tenors=list(df_dict.values()[0])
     prd=['3m'] * (len(tenors)-1)    
     
     rlt={}
     for each in df_dict.keys():
-        if each.endswith("Spot"):
+        if each.endswith("Spot"): # Find Spot Curve
             key=each
             spottbl=df_dict[each]
             spot_idx=df_dict[each].index.tolist()
-        if each.endswith("3m"):
+        if each.endswith("3m"):  # Find forward 3m Curve
             fwdtbl=df_dict[each]
             fwd_idx=df_dict[each].index.tolist()
     
     dels=[]
     carry_list = []
-    for each in spot_idx:
+    for each in spot_idx:   # Calculate 3m Carry with spot curve and forward 3m curve
         if each in fwd_idx:
             s = spottbl.loc[each].to_dict()
             f = fwdtbl.loc[each].to_dict()
@@ -457,22 +470,23 @@ def Carry(df_dict):
     return rlt
    
 def TotalReturn(df_dict):
+    """Calculate 3m Total Return for Spot Curve"""
     tenors=list(df_dict.values()[0])
     prd=['3m'] * (len(tenors)-1)    
     
     rlt={}
     for each in df_dict.keys():
-        if each.endswith("Spot"):
+        if each.endswith("Spot"):  # Find Spot Curve
             key=each
             spottbl=df_dict[each]
             spot_idx=df_dict[each].index.tolist()
-        if each.endswith("3m"):
+        if each.endswith("3m"):  # Find 3m Forward Curve
             fwdtbl=df_dict[each]
             fwd_idx=df_dict[each].index.tolist()
     
     dels=[]
     tr_list = []
-    for each in spot_idx:
+    for each in spot_idx:  # Calculate 3m Total Return 
         if each in fwd_idx:
             s = spottbl.loc[each].to_dict()
             f = fwdtbl.loc[each].to_dict()
@@ -489,21 +503,22 @@ def TotalReturn(df_dict):
     return rlt
 
 def SpreadsFlysVol(df_dict,crsr,frequency='d'):
+    """Calculate Volatility of spreads and flys"""
     frequency_dict={'d':252,'w':52, 'm':12, 'a':1}
-    tbls1=[x+'Spreads' for x in df_dict.keys()]
-    tbls2=[x+'Flys' for x in df_dict.keys()]
+    tbls1=[x+'Spreads' for x in df_dict.keys()]  # Construct Spreads table name
+    tbls2=[x+'Flys' for x in df_dict.keys()]  # Construct Flys table name
 
-    if len(df_dict.values()[0])>60:
+    if len(df_dict.values()[0])>60:  # Extract full range of Spreads/Flys
         spreads_dict=Tables2DF(crsr,*tbls1)
         flys_dict=Tables2DF(crsr,*tbls2)
     else:
-        spreads_dict=Tables2DF(crsr,*tbls1,LB='1y')
+        spreads_dict=Tables2DF(crsr,*tbls1,LB='1y')  # Extract last 1y's Spreads/Flys
         flys_dict=Tables2DF(crsr,*tbls2,LB='1y')
     
     
     rlt1={}
     rlt2={}
-    for key1,df1 in spreads_dict.items():
+    for key1,df1 in spreads_dict.items(): # Compute Spreads Volatility
         df1.sort_index(inplace=True)
         df1=df1.diff()
         df1=df1.dropna()
@@ -512,7 +527,7 @@ def SpreadsFlysVol(df_dict,crsr,frequency='d'):
         key1=key1+'Vol'
         rlt1[key1]=v1
     
-    for key2,df2 in flys_dict.items():
+    for key2,df2 in flys_dict.items():  # Compute Flys Volatility
         df2.sort_index(inplace=True)
         df2=df2.diff()
         df2=df2.dropna()
@@ -523,17 +538,18 @@ def SpreadsFlysVol(df_dict,crsr,frequency='d'):
      
     return rlt1,rlt2
     
-def YieldsVol(df_dict,crsr,frequency='d'):
+def YieldsVol(df_dict,crsr,frequency='d'): 
+    """Compute Yield Volatility"""
     frequency_dict={'d':252,'w':52, 'm':12, 'a':1}
     tbls=df_dict.keys()
     
-    if len(df_dict.values()[0])>60:
+    if len(df_dict.values()[0])>60:   # Extract full range of Yields
         ylds_dict=Tables2DF(crsr,*tbls)
     else:
-        ylds_dict=Tables2DF(crsr,*tbls,LB='1y')
+        ylds_dict=Tables2DF(crsr,*tbls,LB='1y')  # Extract Last 1y's Yields
     
     rlt1={}
-    for key,df in ylds_dict.items():
+    for key,df in ylds_dict.items():  # Compute Volatility
         df.sort_index(inplace=True)
         df=df.diff()
         df=df.dropna()
@@ -547,9 +563,12 @@ def YieldsVol(df_dict,crsr,frequency='d'):
     
     
 def AdjRD(df_dict,crsr):
-    tbls1=[x+'RD' for x in df_dict.keys()]
-    tbls2=[x+'Vol' for x in df_dict.keys()]
-    if len(df_dict.values()[0])>60:
+    """Compute Adjusted Rolldown"""
+    tbls1=[x+'RD' for x in df_dict.keys()]  # Construct table name of Rolldown
+    tbls2=[x+'Vol' for x in df_dict.keys()]  # Construct table name of Yield Volatility
+   
+    # Extract Data from Database
+    if len(df_dict.values()[0])>60:  
         RD_dict=Tables2DF(crsr,*tbls1)
         vols_dict=Tables2DF(crsr,*tbls2)
     else:
@@ -557,7 +576,7 @@ def AdjRD(df_dict,crsr):
         vols_dict=Tables2DF(crsr,*tbls2,LB='1y')
     
     rlt={}
-    for key,df in RD_dict.items():
+    for key,df in RD_dict.items():  # Compute Adjusted Rolldown
         key2=key[: -2]+'Vol'
         df2=vols_dict[key2]
         idx2=df2.index.tolist()
@@ -573,12 +592,15 @@ def AdjRD(df_dict,crsr):
     return rlt
 
 def AdjCarryTR(df_dict,crsr):
+    """Compute Adjusted Carry and Adjusted Total Return"""
+    # Construct Table names
     for each in df_dict.keys():
         if each.endswith('Spot'):
             tbl1=each+'Carry'
             tbl2=each+'Vol'
             tbl3=each+'TR'
     
+    # Extract Data
     if len(df_dict.values()[0])>60:
         dfs=Tables2DF(crsr,tbl1,tbl2,tbl3)
     else:
@@ -591,18 +613,20 @@ def AdjCarryTR(df_dict,crsr):
     idx2=df2.index.tolist()
     idx1=df1.index.tolist()
     idx3=df3.index.tolist()
-    idx_c=list(set(idx1).intersection(idx2))
+    idx_c=list(set(idx1).intersection(idx2))  
     idx_c.sort()
     idx_tr=list(set(idx3).intersection(idx2))
     idx_tr.sort()
     
-    df1=df1.loc[idx_c]
+    # Compute Adjusted Carry
+    df1=df1.loc[idx_c]  
     df2_c=df2.loc[idx_c]
     df2_c=df2[df1.columns]
     ac=df1.div(df2_c)
     key3=tbl1[:-5]+'AdjCarry'
     rlt[key3]=ac
     
+    # Compute Adjusted Total Return
     df3=df3.loc[idx_tr]
     df2_tr=df2.loc[idx_tr]
     df2_tr=df2[df3.columns]
@@ -614,6 +638,7 @@ def AdjCarryTR(df_dict,crsr):
     
     
 def SpreadsFlysTR(df_dict):
+    """Compute Total Return of Spreads and Flys"""
     Convert_dict1={'2s5s':['2y','5y'],'5s10s':['5y','10y'],'2s10s':['2y','10y'],'1s2s':['1y','2y'],'2s3s':['2y','3y'],'1s3s':['1y','3y'],'3s5s':['3y','5y'],'5s7s':['5y','7y']}
     spreads=['2s5s','5s10s','2s10s','1s2s','2s3s','1s3s','3s5s','5s7s']
     
@@ -622,12 +647,12 @@ def SpreadsFlysTR(df_dict):
     
     
     tenors1=[]
-    for each in spreads:
+    for each in spreads: # Merge tenors in Spreads into one list
         tenors1=tenors1+Convert_dict1[each]
     prd1 = ['3m'] * len(tenors1)
     
     tenors2=[]
-    for each in flys:
+    for each in flys: # Merge tenors in Flys into one list
         tenors2=tenors2+Convert_dict2[each]
     prd2 = ['3m'] * len(tenors2)
     
@@ -681,8 +706,10 @@ def SpreadsFlysTR(df_dict):
     return rlt1,rlt2
     
 def AdjSpreadsTR(df_dict,crsr):
-    tbls1=[x+'SpreadsRD' for x in df_dict.keys()]
-    tbls2=[x+'SpreadsVol' for x in df_dict.keys()]
+    """Compute Adjusted Total Return of Spreads"""
+    tbls1=[x+'SpreadsRD' for x in df_dict.keys()]  # construct Spread Rolldown table 
+    tbls2=[x+'SpreadsVol' for x in df_dict.keys()]  # construct Spreads Volatility table
+    # Extract Data from Database
     if len(df_dict.values()[0])>60:
         RD_dict=Tables2DF(crsr,*tbls1)
         vols_dict=Tables2DF(crsr,*tbls2)
@@ -691,7 +718,7 @@ def AdjSpreadsTR(df_dict,crsr):
         vols_dict=Tables2DF(crsr,*tbls2,LB='1y')
     
     rlt={}
-    for key,df in RD_dict.items():
+    for key,df in RD_dict.items(): # Compute Volatility adjusted Spreads Rolldown
         key2=key[:-2]+'Vol'
         df2=vols_dict[key2]
         idx2=df2.index.tolist()
@@ -707,8 +734,10 @@ def AdjSpreadsTR(df_dict,crsr):
     
     
 def AdjFlysTR(df_dict,crsr):
-    tbls1=[x+'FlysRD' for x in df_dict.keys()]
-    tbls2=[x+'FlysVol' for x in df_dict.keys()]
+    """Compute Adjusted Total Return of Flys"""
+    tbls1=[x+'FlysRD' for x in df_dict.keys()]  # construct Flys Rolldown table
+    tbls2=[x+'FlysVol' for x in df_dict.keys()] # construct Flys Volatility table
+    # Extract Data from Database
     if len(df_dict.values()[0])>60:
         RD_dict=Tables2DF(crsr,*tbls1)
         vols_dict=Tables2DF(crsr,*tbls2)
@@ -717,7 +746,7 @@ def AdjFlysTR(df_dict,crsr):
         vols_dict=Tables2DF(crsr,*tbls2,LB='1y')
     
     rlt={}
-    for key,df in RD_dict.items():
+    for key,df in RD_dict.items(): # Compute Volatility adjusted Flys Rolldown
         key2=key[:-2]+'Vol'
         df2=vols_dict[key2]
         idx2=df2.index.tolist()

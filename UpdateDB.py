@@ -2,6 +2,10 @@
 """
 Created on Mon Oct 09 10:16:33 2017
 @author: luoying.li
+This script contains functions to Update Databases
+
+-Function updateDB is to update YieldData Database. 
+-Function UpdateElements is to update TempData Database based in yields in YieldData Database
 """
 
 import xlwings as xw
