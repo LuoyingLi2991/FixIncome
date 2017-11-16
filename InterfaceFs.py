@@ -18,7 +18,7 @@ import datetime
 
 
 def convertT(t):
-    """Function convert tenors to number e.g 3m->0.35 , 1y->1
+    """Function convert tenors to number e.g 3m->0.25 , 1y->1
     t: either a single tenor or a list of tenors
     """
     if isinstance(t,list):  # if t is a list 
@@ -201,12 +201,13 @@ def CalcTbl(df,Country,Asset,Curve,tenor1,tenor2,tenor3):
 
 
 
-def FormatIdx(idx):
-    """This funtion formats index into multiIndex"""
+def FormatIdx(idx,n):
+    """This funtion formats the first row of titles in a tables into a multiIndex(2,3) 
+    such that the first row elements all have the same elements as (1,1) """
     a=list(idx.labels[0])  # Get label from index
-    for i in range(len(a)/3):  # Format label
-        a[3*i+1]=a[3*i]
-        a[3*i+2]=a[3*i]
+    for i in range(len(a)/n):# Format label
+        for j in range(n):
+            a[n*i+j]=a[n*i]
     b=list(idx.labels[1])
     label=[a,b] 
     idx.set_labels(label,inplace=True)  # Set Labels for index
@@ -214,55 +215,62 @@ def FormatIdx(idx):
     return idx  # Return index
 
 
-def Convert2DF(df):
+def Convert2DF(df,n):
     """This function converts tables in Excel to Dataframe"""
     df.drop(df.index[0],inplace=True)  # Drop the first row due to the format of table read from Excel GUI
     df1=df.T  # Transpose dataframe
     df1.set_index([1,2], inplace=True)  # Set first two columns as index
     h=df1.index
     h=h[2:]  # Get Index and delete first two, as the first two are None
-    h=FormatIdx(h)  # Format Index 
+    h=FormatIdx(h,n)  # Format Index 
     df.set_index([0,1], inplace=True)  # Set first two columns as index for None transposed dataframe
     idx=df.index[2:]  # Get Index and format index
-    idx=FormatIdx(idx)
+    idx=FormatIdx(idx,n)
     df=df[2:]  # Delete first two rows
     df=pd.DataFrame(df.values.tolist(),columns=h,index=idx)  # Construct MultiIndex Dataframe
     return df
 
 
 def Filter(c1,c2,Title,*args):
-    """Select data that fullfill the criteria: location %>c1 AND RollDown%>c2
+    """Searches table elements that meet certain Level/Rolldown criteria.
+    Select data that fullfill the criteria: location %>c1 AND RollDown%>c2
     Title: Title of this criteria
     *args: a list of dataframes with sequence like: location, rolldown,location,rolldown....
     """
-    n=len(args)/2  # Get number of combinations
+    n=len(args)/2
     asset=[]
     level=[]
     RD=[]
     P=[]
+    Prd=[]
     for i in range(n):  # For each combination, go through filter process
-        lvl=Convert2DF(args[2*i])
-        rd=Convert2DF(args[2*i+1])
+        lvl=args[2*i]
+        rd=args[2*i+1]
+        
         curves=list(lvl.columns.levels[0])
         tenors=list(rd.index.levels[0])
         lvl1=lvl.filter(like='Today', axis=0)  # Filter Out Today's Locations
         lvl1=lvl1.filter(like='PCTL', axis=1)  # Filter Out Percentile of Today's Locations
         rd1=rd.filter(like='Today', axis=0)  # Filter Out Today's Rolldowns         
         rd1=rd1.filter(like='PCTL', axis=1)  # Filter Out Percentile of Today's Rolldowns
+
         for curve in curves:
-            if curve.endswith("Spot"): rdC=curve+'TR'  # RollDown table has different header names
+            if "Spot" in curve: rdC=curve+'TR'  # RollDown table has different header names
             else: rdC=curve+'RD' 
             for t in tenors:  # Start filter process
                 if ((lvl1[curve].loc[t].values[0][0]>c1) or(lvl1[curve].loc[t].values[0][0]<1-c1)) and rd1[rdC].loc[t].values[0][0]>c2:
                     level.append(lvl[curve]['Level'].loc[t]['Today'])
                     RD.append(rd[rdC]['Level'].loc[t]['Today'])
                     P.append(lvl[curve]['PCTL'].loc[t]['Today'])
+                    Prd.append(rd[rdC]['PCTL'].loc[t]['Today'])
                     asset.append(curve+'/'+t)
     for i,each in enumerate(P):
         P[i]="{0:.0f}%".format(each * 100)
-    vals=[asset,level,RD,P]  
-    df=pd.DataFrame(vals,index=[[Title]*4,['Asset','Level','RollDown','Location%']])  # Construct results dataframe
-    df.index.set_labels([0,-1,-1,-1],level=0,inplace=True)  
+    for i,each in enumerate(Prd):
+        Prd[i]="{0:.0f}%".format(each * 100)
+    vals=[asset,level,RD,P,Prd]  
+    df=pd.DataFrame(vals,index=[[Title]*5,['Asset','Level','RollDown','Level%','Rolldown%']])  # Construct results dataframe
+    #df.index.set_labels([0,-1,-1,-1,-1],level=0,inplace=True)  
     df=df.T
     if not df.empty:
         df.index = pd.RangeIndex(1,1 + len(df))
@@ -281,9 +289,16 @@ def Filter(c1,c2,Title,*args):
 @xw.ret(expand='table')
 def List1(lvl,rd,S,Srd,F,Frd,c1,c2):
     """Display results for Criteria 1"""
-    args=[lvl,rd,S,Srd,F,Frd]
+    temp=[lvl,rd,S,Srd,F,Frd]
+    n=len(temp)/2
+    args=[]
+    for i in range(n):  # For each combination, convert table to MultiIndex Dataframe
+        args.append(Convert2DF(temp[2*i],3))
+        args.append(Convert2DF(temp[2*i+1],3))
     Title='Criteria: '+str(int(c1*100))+'/'+str(int(c2*100))
-    return Filter(c1,c2,Title,*args)
+    df=Filter(c1,c2,Title,*args)
+    df.columns.set_labels([0,-1,-1,-1,-1],level=0,inplace=True)  
+    return df
 
 @xw.func
 @xw.arg('lvl', pd.DataFrame, index=False, header=False) # Yields Level Table in Excel GUI
@@ -295,9 +310,16 @@ def List1(lvl,rd,S,Srd,F,Frd,c1,c2):
 @xw.ret(expand='table')
 def List4(lvl,rd,S,Srd,F,Frd,c1,c2):
     """Display results for Criteria 4"""
-    args=[lvl,rd,S,Srd,F,Frd]
+    temp=[lvl,rd,S,Srd,F,Frd]
+    n=len(temp)/2
+    args=[]
+    for i in range(n):  # For each combination, convert table to MultiIndex Dataframe
+        args.append(Convert2DF(temp[2*i],3))
+        args.append(Convert2DF(temp[2*i+1],3))
     Title='Criteria: '+str(int(c1*100))+'/'+str(int(c2*100))
-    return Filter(c1,c2,Title,*args)
+    df=Filter(c1,c2,Title,*args)
+    df.columns.set_labels([0,-1,-1,-1,-1],level=0,inplace=True)  
+    return df
 
 
 @xw.func
@@ -310,9 +332,16 @@ def List4(lvl,rd,S,Srd,F,Frd,c1,c2):
 @xw.ret(expand='table')
 def List2(lvl,rd,S,Srd,F,Frd,c1,c2):
     """Display results for Criteria 2"""
-    args=[lvl,rd,S,Srd,F,Frd]
+    temp=[lvl,rd,S,Srd,F,Frd]
+    n=len(temp)/2
+    args=[]
+    for i in range(n):  # For each combination, convert table to MultiIndex Dataframe
+        args.append(Convert2DF(temp[2*i],3))
+        args.append(Convert2DF(temp[2*i+1],3))
     Title='Criteria: '+str(int(c1*100))+'/'+str(int(c2*100))
-    return Filter(c1,c2,Title,*args)
+    df=Filter(c1,c2,Title,*args)
+    df.columns.set_labels([0,-1,-1,-1,-1],level=0,inplace=True)  
+    return df
 
 @xw.func
 @xw.arg('lvl', pd.DataFrame, index=False, header=False) # Yields Level Table in Excel GUI
@@ -324,9 +353,16 @@ def List2(lvl,rd,S,Srd,F,Frd,c1,c2):
 @xw.ret(expand='table')
 def List3(lvl,rd,S,Srd,F,Frd,c1,c2):
     """Display results for Criteria 2"""
-    args=[lvl,rd,S,Srd,F,Frd]
+    temp=[lvl,rd,S,Srd,F,Frd]
+    n=len(temp)/2
+    args=[]
+    for i in range(n):  # For each combination, convert table to MultiIndex Dataframe
+        args.append(Convert2DF(temp[2*i],3))
+        args.append(Convert2DF(temp[2*i+1],3))
     Title='Criteria: '+str(int(c1*100))+'/'+str(int(c2*100))
-    return Filter(c1,c2,Title,*args)    
+    df=Filter(c1,c2,Title,*args)   
+    df.columns.set_labels([0,-1,-1,-1,-1],level=0,inplace=True)  
+    return df 
     
     
 
@@ -558,7 +594,7 @@ def GetTbls(TableList,LookBackWindow,TblSuffix,path):
     headers=list(df_dict.values()[0])  # Get column names
     
     temp1=[]  # Construct result dataframe's column names
-    for tbl in TableList:
+    for tbl in tbls:
         temp1=temp1+[tbl]*3
     rlt_cols = [np.array(temp1), np.array(['Level', 'Z', 'PCTL']*len(TableList))]    
     
